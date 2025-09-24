@@ -1,0 +1,1 @@
+# Quasicrystal_Majorana_project
