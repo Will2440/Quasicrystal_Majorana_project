@@ -1,0 +1,6 @@
+images_and_graphs/
+*.json
+*.png
+*.bson
+*.gif
+*.log
