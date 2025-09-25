@@ -1,4 +1,5 @@
-images_and_graphs/
+# plots_masters_thesis/
+# final_data_masters_thesis/
 *.json
 *.png
 *.bson
