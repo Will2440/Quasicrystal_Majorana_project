@@ -1,0 +1,12 @@
+Job ID: 11716092
+Array Job ID: 11716092_251
+Cluster: bristol_cluster
+User/Group: hb21877/fs21
+State: COMPLETED (exit code 0)
+Nodes: 1
+Cores per node: 10
+CPU Utilized: 03:18:05
+CPU Efficiency: 54.42% of 06:04:00 core-walltime
+Job Wall-clock time: 00:36:24
+Memory Utilized: 741.00 MB
+Memory Efficiency: 72.36% of 1.00 GB
