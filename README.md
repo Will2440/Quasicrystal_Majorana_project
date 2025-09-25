@@ -31,6 +31,8 @@ The current focus is on the calculation of the fractal dimanesions of the topolo
 
 ## Usage
 
-- To run your own simulations go to <simulations/data_collection>. If you are running these on the 
+- To run your own simulations go to <simulations/data_collection>. 
+  - To run on your local machine go to <simulations/data_collection/local_machine> and see the detailed README there.
+  - To run on hpc go to <simulations/data_collection/hpc_compatible>. Presently the <serial_batch/> is ready to go.
 - For access to existing clean data from the final masters thesis submission look in <final_data_masters_thesis>. N.B. The data structure of these data will not always match the currently active bson_unpacker.jl functions. This function expects a full compliment of values recorded, whereas the old thesis data will vary. To process this data the same functions can be used, but care must be taken adjusting the DataFrame creation in process_bson_files() so that it matches the contents of the .bsons exactly.
 
