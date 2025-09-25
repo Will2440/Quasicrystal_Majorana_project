@@ -42,14 +42,14 @@ plastic_sequence = SeqGen.plastic_SeqGen(N_seq_seed)
 
 
 ## N Range (even single value must be a Vector type)
-N_range = [20]
+N_range = [50]
 #collect(Int, range(55,55,1))
 #floor.(Int, log_range(2.0, 3.0, 7.0, 10))
 
 
 ## t_n Range (combine any number of different hopping ranges)
 t1_range = collect(range(1.0, 1.0, 1))
-t2_range = collect(range(2.0, 2.0, 11))
+t2_range = collect(range(1.0, 2.0, 11))
 t_ranges = [t1_range, t2_range]
 t_combinations_1 = ParamCombGen.t_ranges_combs(t_ranges)
 
@@ -62,6 +62,7 @@ t_combinations_1 = ParamCombGen.t_ranges_combs(t_ranges)
 
 # t_combinations = vcat(t_combinations_1, t_combinations_2)
 t_combinations = t_combinations_1
+println(t_combinations)
 
 
 ## mu Range (even single calue must be a Vector type)
@@ -103,7 +104,7 @@ chunk_size = 1000
 
 
 root_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data"
-folder_name = "test_folder_hp_all_calcs"
+folder_name = "test_folder_np"
 path = "$(root_path)/$(folder_name)/"
 
 # Create the folder if it doesn't exist
@@ -112,7 +113,7 @@ isdir(path) || mkpath(path)
 
 
 ###########################################################
-#################### Sec 2: Tailoring #####################
+#################### Sec 3: Tailoring #####################
 ###########################################################
 
 
@@ -122,7 +123,7 @@ function get_user_options()
         true,   # calc_ipr
         true,   # calc_mbs_energy_gap
         true,   # calc_loc_len
-        :hp,     # calc_precision: :hp, :np
+        :np,     # calc_precision: :hp, :np
         :maj_np, # save_evecs: :all_np, :all_hp, :maj_np, :maj_hp, :none
         :all_np, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
         :generic # solver_type: :generic, :mu_loop, :N_loop
