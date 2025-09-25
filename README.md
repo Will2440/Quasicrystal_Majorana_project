@@ -1,9 +1,6 @@
 # Quasicrystal_Majorana_project
 
 
-# Majorana modes in quasicrystals
-
-
 ## Original Outlook
 
 In this work we will study the existence of Majorana modes in quasicrystalline systems. To do so we will start by studying and analysing the paradigmatic example of the 1D periodic Kitaev chain. In doing so, we will familiarise ourselves with the BdG formalism, the characterisation of a topological phase via topological invariants and the LDOS. 
