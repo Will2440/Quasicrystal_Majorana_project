@@ -32,7 +32,7 @@
 """
 
 module LocalSolv
-export hp_generic_solver, np_generic_solver, UserOptions
+export hp_generic_solver, np_generic_solver, np_mu_rho_restricted_solver, UserOptions
 
 using GenericLinearAlgebra
 using LinearAlgebra
@@ -359,36 +359,34 @@ function hp_generic_solver(
         loc_len = opts.calc_loc_len ? hp_calc_maj_loc_len(evecs) : NaN
 
         # Eigenvalue saving options (symbol-based)
-        evals_float = Float64.(evals)
         eigenvalues_to_save = begin
             if opts.save_evals == :all_hp
                 evals
             elseif opts.save_evals == :all_np
-                evals_float
+                Float64.(evals)
             elseif opts.save_evals == :maj_hp
                 mid = length(evals) ÷ 2
                 evals[mid:mid+1]
             elseif opts.save_evals == :maj_np
                 mid = length(evals) ÷ 2
-                evals_float[mid:mid+1]
+                (Float64.(evals))[mid:mid+1]
             else
                 missing
             end
         end
 
         # Eigenvector saving options (symbol-based)
-        evecs_float = Float64.(evecs)
         eigenvectors_to_save = begin
             if opts.save_evecs == :all_hp
                 evecs
             elseif opts.save_evecs == :all_np
-                evecs_float
+                Float64.(evecs)
             elseif opts.save_evecs == :maj_hp
                 mid = size(evecs, 2) ÷ 2
                 evecs[:, mid:mid+1]
             elseif opts.save_evecs == :maj_np
                 mid = size(evecs, 2) ÷ 2
-                evecs_float[:, mid:mid+1]
+                (Float64.(evecs))[:, mid:mid+1]
             else
                 missing
             end
@@ -575,6 +573,356 @@ function np_generic_solver(
     return nothing
 end
 
+function np_mu_rho_restricted_solver(
+    N_range::Vector{Int},
+    t_n_range::Vector{Vector{Float64}},
+    mu_range::Vector{Float64},
+    unrestricted_points::Vector{Tuple{Float64, Float64}},
+    Delta_range::Vector{Float64},
+    sequences::Vector{Vector{Int}},
+    sequence_name::String,
+    chunk_size::Int,
+    filepath::String,
+    opts::UserOptions
+)
+    """
+        Notes:
+            - np_generic_solver iterates over all possible parameter ranges idnescriminately, hence 'generic'.
+            - The use of thread IDs to distribute tasks and data storage shoul donly be used on local machines where such ID-ing is known
+            - This can be used when the optimal loop method is not known or not needed.
+        CAUTION: 
+            - This ProgressMeter @showprogress may not give accurate representation of time remaining if disordered parameter looping results in variation in loop time over runtime.
+            - The chunk_size must be sufficiently small to not exceed the memory allocated to this task (again paying attention to idnescriminate loop orders).
+    """
+
+    # Thread-local data store
+    thread_local_results = Dict(Threads.threadid() => DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        mp = Float64[],
+        maj_gap = Float64[],
+        ipr = Float64[],
+        loc_len = Float64[],
+        eigenvalues = Union{Vector{Float64}, Missing}[],
+        eigenvectors = Union{Matrix{Float64}, Missing}[]
+    ))
+
+    # Thread-local chunk counters
+    thread_local_chunks = Dict(Threads.threadid() => 1)
+
+    # Iterate over parameter combinations in parallel
+    @showprogress Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
+        thread_id = Threads.threadid()
+
+        # Initialize thread-local storage for this thread (if not already initialized)
+        if !haskey(thread_local_results, thread_id)
+            thread_local_results[thread_id] = DataFrame(
+                N = Int[],
+                t_n = Vector{Float64}[],
+                mu = Float64[],
+                Delta = Float64[],
+                sequence_name = String[],
+                mp = Float64[],
+                maj_gap = Float64[],
+                ipr = Float64[],
+                loc_len = Float64[],
+                eigenvalues = Union{Vector{Float64}, Missing}[],
+                eigenvectors = Union{Matrix{Float64}, Missing}[]
+            )
+            thread_local_chunks[thread_id] = 1
+        end
+
+        results_df = thread_local_results[thread_id]
+        chunk_idx = thread_local_chunks[thread_id]
+
+        # Extract parameters
+        N = N_range[idx[1]]
+        t_n = t_n_range[idx[2]]
+        mu = mu_range[idx[3]]
+        Delta = Delta_range[idx[4]]
+        sequence = sequences[idx[5]]
+
+        # mu = mu_rho_point[1]
+        # t_n = [1.0, mu_rho_point[2]]  # Based on t1=1.0 always!
+
+        rho = t_n[2] / t_n[1] 
+
+        is_unrestricted = !any(p -> p[1] == mu && p[2] == rho, unrestricted_points)
+
+        if is_unrestricted
+            # Perform computations to solve Hamiltonian
+            truncated_sequence = Vector(sequence[1:N])
+            BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
+            evals, evecs = LinearAlgebra.eigen(Hermitian(BdG))
+
+            # Calculation options
+            mp = opts.calc_mp ? np_calc_maj_mp(evecs) : NaN
+            gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
+            ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
+            loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+
+
+            # Eigenvalue saving options (symbol-based)
+            eigenvalues_to_save = begin
+                if opts.save_evals == :all_np
+                    evals
+                elseif opts.save_evals == :maj_np
+                    mid = length(evals) ÷ 2
+                    evals[mid:mid+1]
+                else
+                    missing
+                end
+            end
+
+            # Eigenvector saving options (symbol-based)
+            eigenvectors_to_save = begin
+                if opts.save_evecs == :all_np
+                    evecs
+                elseif opts.save_evecs == :maj_np
+                    mid = size(evecs, 2) ÷ 2
+                    evecs[:, mid:mid+1]
+                else
+                    missing
+                end
+            end
+
+            # Append results to the thread's local DataFrame
+            push!(results_df, (
+                N = N,
+                t_n = t_n,
+                mu = mu,
+                Delta = Delta,
+                sequence_name = sequence_name,
+                mp = mp,
+                maj_gap = gap,
+                ipr = ipr,
+                loc_len = loc_len,
+                eigenvalues = eigenvalues_to_save,
+                eigenvectors = eigenvectors_to_save
+            ))
+        
+        else
+            push!(results_df, (
+                N = N,
+                t_n = t_n,
+                mu = mu,
+                Delta = Delta,
+                sequence_name = sequence_name,
+                mp = NaN,
+                maj_gap = NaN,
+                ipr = NaN,
+                loc_len = NaN,
+                eigenvalues = missing,
+                eigenvectors = missing
+            ))
+        end
+
+        # Save chunk if the DataFrame reaches the chunk size
+        if nrow(results_df) >= chunk_size
+            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            @save file_name results_df
+            empty!(results_df)
+            thread_local_chunks[thread_id] += 1
+        end
+    end
+
+    # Save any remaining rows in each thread's DataFrame
+    for thread_id in keys(thread_local_results)
+        results_df = thread_local_results[thread_id]
+        if nrow(results_df) > 0
+            chunk_idx = thread_local_chunks[thread_id]
+            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            @save file_name results_df
+        end
+    end
+
+    return nothing
+end
+
+function hp_mu_rho_restricted_solver(
+    N_range::Vector{Int},
+    t_n_range::Vector{Vector{Float64}},
+    mu_range::Vector{Float64},
+    unrestricted_points::Vector{Tuple{Float64, Float64}},
+    Delta_range::Vector{Float64},
+    sequences::Vector{Vector{Int}},
+    sequence_name::String,
+    precision::Int,
+    chunk_size::Int,
+    filepath::String,
+    opts::UserOptions
+)
+    """
+        Notes:
+            - np_generic_solver iterates over all possible parameter ranges idnescriminately, hence 'generic'.
+            - The use of thread IDs to distribute tasks and data storage shoul donly be used on local machines where such ID-ing is known
+            - This can be used when the optimal loop method is not known or not needed.
+        CAUTION: 
+            - This ProgressMeter @showprogress may not give accurate representation of time remaining if disordered parameter looping results in variation in loop time over runtime.
+            - The chunk_size must be sufficiently small to not exceed the memory allocated to this task (again paying attention to idnescriminate loop orders).
+    """
+
+    # Thread-local data store
+    thread_local_results = Dict(Threads.threadid() => DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        mp = Float64[],
+        maj_gap = Float64[],
+        ipr = Float64[],
+        loc_len = Float64[],
+        eigenvalues = Union{Vector{Float64}, Missing}[],
+        eigenvectors = Union{Matrix{Float64}, Missing}[]
+    ))
+
+    # Thread-local chunk counters
+    thread_local_chunks = Dict(Threads.threadid() => 1)
+
+    # Iterate over parameter combinations in parallel
+    @showprogress Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
+        thread_id = Threads.threadid()
+
+        # Initialize thread-local storage for this thread (if not already initialized)
+        if !haskey(thread_local_results, thread_id)
+            thread_local_results[thread_id] = DataFrame(
+                N = Int[],
+                t_n = Vector{Float64}[],
+                mu = Float64[],
+                Delta = Float64[],
+                sequence_name = String[],
+                mp = Float64[],
+                maj_gap = Float64[],
+                ipr = Float64[],
+                loc_len = Float64[],
+                eigenvalues = Union{Vector{Float64}, Missing}[],
+                eigenvectors = Union{Matrix{Float64}, Missing}[]
+            )
+            thread_local_chunks[thread_id] = 1
+        end
+
+        results_df = thread_local_results[thread_id]
+        chunk_idx = thread_local_chunks[thread_id]
+
+        # Extract parameters
+        N = N_range[idx[1]]
+        t_n = t_n_range[idx[2]]
+        mu = mu_range[idx[3]]
+        Delta = Delta_range[idx[4]]
+        sequence = sequences[idx[5]]
+
+        # mu = mu_rho_point[1]
+        # t_n = [1.0, mu_rho_point[2]]  # Based on t1=1.0 always!
+
+        rho = t_n[2] / t_n[1] 
+
+        is_unrestricted = !any(p -> p[1] == mu && p[2] == rho, unrestricted_points)
+
+        if is_unrestricted
+            # Perform computations to solve Hamiltonian
+            truncated_sequence = Vector(sequence[1:N])
+            BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
+            evals, evecs = GenericLinearAlgebra.eigen(Hermitian(BdG))
+
+            # Calculation options
+            mp = opts.calc_mp ? np_calc_maj_mp(evecs) : NaN
+            gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
+            ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
+            loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+
+
+            # Eigenvalue saving options (symbol-based)
+            eigenvalues_to_save = begin
+                if opts.save_evals == :all_hp
+                    evals
+                elseif opts.save_evals == :all_np
+                    Float64.(evals)
+                elseif opts.save_evals == :maj_hp
+                    mid = length(evals) ÷ 2
+                    evals[mid:mid+1]
+                elseif opts.save_evals == :maj_np
+                    mid = length(evals) ÷ 2
+                    (Float64.(evals))[mid:mid+1]
+                else
+                    missing
+                end
+            end
+
+            # Eigenvector saving options (symbol-based)
+            eigenvectors_to_save = begin
+                if opts.save_evecs == :all_hp
+                    evecs
+                elseif opts.save_evecs == :all_np
+                    Float64.(evecs)
+                elseif opts.save_evecs == :maj_hp
+                    mid = size(evecs, 2) ÷ 2
+                    evecs[:, mid:mid+1]
+                elseif opts.save_evecs == :maj_np
+                    mid = size(evecs, 2) ÷ 2
+                    (Float64.(evecs))[:, mid:mid+1]
+                else
+                    missing
+                end
+            end
+
+            # Append results to the thread's local DataFrame
+            push!(results_df, (
+                N = N,
+                t_n = t_n,
+                mu = mu,
+                Delta = Delta,
+                sequence_name = sequence_name,
+                mp = mp,
+                maj_gap = gap,
+                ipr = ipr,
+                loc_len = loc_len,
+                eigenvalues = eigenvalues_to_save,
+                eigenvectors = eigenvectors_to_save
+            ))
+        
+        else
+            push!(results_df, (
+                N = N,
+                t_n = t_n,
+                mu = mu,
+                Delta = Delta,
+                sequence_name = sequence_name,
+                mp = NaN,
+                maj_gap = NaN,
+                ipr = NaN,
+                loc_len = NaN,
+                eigenvalues = missing,
+                eigenvectors = missing
+            ))
+        end
+
+        # Save chunk if the DataFrame reaches the chunk size
+        if nrow(results_df) >= chunk_size
+            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            @save file_name results_df
+            empty!(results_df)
+            thread_local_chunks[thread_id] += 1
+        end
+    end
+
+    # Save any remaining rows in each thread's DataFrame
+    for thread_id in keys(thread_local_results)
+        results_df = thread_local_results[thread_id]
+        if nrow(results_df) > 0
+            chunk_idx = thread_local_chunks[thread_id]
+            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            @save file_name results_df
+        end
+    end
+
+    return nothing
+end
+
+# not integrated
 function hp_mu_loop_solver(
     N::Int,
     t_n::Vector{Float64},
@@ -648,6 +996,7 @@ function hp_mu_loop_solver(
     return nothing
 end
 
+# not integrated
 function hp_serial_solver_N_loop(
     N_range::Vector{Int},
     t_n::Vector{Float64},
@@ -714,6 +1063,7 @@ function hp_serial_solver_N_loop(
     return nothing
 end
 
+# not integrated
 function hp_serial_solver_N_loop_threaded(
     N_range::Vector{Int},
     t_n::Vector{Float64},

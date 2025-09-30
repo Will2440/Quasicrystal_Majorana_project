@@ -1,4 +1,7 @@
 
+include("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/data_processing/bson_unpacker.jl")
+
+using DataFrames
 using CSV
 
 ###########################################################
@@ -122,11 +125,11 @@ end
 ###################### Sec 3: Run #########################
 ###########################################################
 
-filepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/test_folder_np_all_calcs/"
-mp_tol = 0.5
+filepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/mu_vs_rho_mp_heatmaps/GQC_N(200-200-1)_t1(1.0-1.0-51__t2(0.0-10.0-51)_mu(0.0-10.0-51)_Delta(0.1-0.1-1)/"
+mp_tol = 0.1
 df = unpack_bason_standard(filepath; mp_tol=mp_tol)
 
-N = 50
+N = 200
 Delta = 0.1
 seq_name = "GQC"
 

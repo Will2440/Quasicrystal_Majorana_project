@@ -26,6 +26,7 @@ using .SeqGen
 using .ParamCombGen
 using .LocalSolv: UserOptions
 using BSON: @save, @load
+using Plots
 
 
 ###########################################################
@@ -49,8 +50,9 @@ N_range = [50]
 
 ## t_n Range (combine any number of different hopping ranges)
 t1_range = collect(range(1.0, 1.0, 1))
-t2_range = collect(range(1.0, 2.0, 11))
-t_ranges = [t1_range, t2_range]
+t2_range = collect(range(0.0, 10.0, 101))
+# t3_range = [2.0, 3.0, 4.0]
+t_ranges = [t1_range, t2_range]#, t3_range]
 t_combinations_1 = ParamCombGen.t_ranges_combs(t_ranges)
 
 # t1_range = collect(range(0.01, 0.99, 99))
@@ -62,16 +64,15 @@ t_combinations_1 = ParamCombGen.t_ranges_combs(t_ranges)
 
 # t_combinations = vcat(t_combinations_1, t_combinations_2)
 t_combinations = t_combinations_1
-println(t_combinations)
 
 
 ## mu Range (even single calue must be a Vector type)
-mu_range = collect(range(0.0, 3.0, length=11))
+mu_range = collect(range(0.0, 10.0, length=101))
 
 
 ## Delta Range (even single value must be a vector type)
-Delta_range = [0.1] 
-#collect(range(0.0, 1.0, 51)) 
+# Delta_range = [0.1] 
+Delta_range = collect(range(0.0, 2.0, 21)) 
 #log_range(10.0, 0.0, 0.0, 1)
 
 
@@ -103,8 +104,8 @@ chunk_size = 1000
 ###########################################################
 
 
-root_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data"
-folder_name = "test_folder_np"
+root_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/dump"
+folder_name = "np/all_crystal_grad_testruns/restricted_mu_vs_rho_mp_heatmaps/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t2_range))__t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
 path = "$(root_path)/$(folder_name)/"
 
 # Create the folder if it doesn't exist
@@ -120,16 +121,118 @@ isdir(path) || mkpath(path)
 function get_user_options()
     return UserOptions(
         true,    # calc_mp
-        true,   # calc_ipr
-        true,   # calc_mbs_energy_gap
-        true,   # calc_loc_len
+        false,   # calc_ipr
+        false,   # calc_mbs_energy_gap
+        false,   # calc_loc_len
         :np,     # calc_precision: :hp, :np
         :maj_np, # save_evecs: :all_np, :all_hp, :maj_np, :maj_hp, :none
-        :all_np, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
-        :generic # solver_type: :generic, :mu_loop, :N_loop
+        :maj_np, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
+        :generic # solver_type: :generic, :mu_loop, :N_loop, :restricted
     )
 end
 
-# --- Main execution ---
+
+###########################################################
+################# Sec 4: Cut Parameters ###################
+###########################################################
+
+# This is specific to a 2-phopping system, adjust as needed for other cases
+rho_min = minimum(t2_range) / maximum(t1_range)
+rho_max = maximum(t2_range) / minimum(t1_range)
+rho_step = (rho_max - rho_min) / length(t2_range)
+rho_range = collect(range(rho_min, rho_max, length(t2_range)))
+
+xs = mu_range
+ys = rho_range
+grad1 = ParamCombGen.angle_to_gradient(45.0)
+grad2 = ParamCombGen.angle_to_gradient(45.0)
+GQC_cuts = [
+    Dict(
+        :gradient => grad1,
+        :y_intercept => -2.0,
+        :x_range => (2.5, maximum(xs)),
+        :y_range => (0.0, maximum(ys)),
+        :cut_which_side => "below"
+    ),
+    Dict(
+        :gradient => grad2,
+        :y_intercept => 2.0,
+        :x_range => (2.5, maximum(xs)),
+        :y_range => (5.0, maximum(ys)),
+        :cut_which_side => "above"
+    ),
+    Dict(
+        :gradient => -10.0,
+        :y_intercept => 30.0,
+        :x_range => (minimum(xs), 2.5),
+        :y_range => (6.0, maximum(ys)),
+        :cut_which_side => "above"
+    )
+]
+
+mu_rho_restricted = ParamCombGen.restrict_range(xs, ys, GQC_cuts)
+
+
+# Function to check the output of cuts before proceeding with simulation
+function plot_mu_rho_restricted(mu_range, rho_range, mu_rho_restricted)
+    # Convert restricted tuples to a Set for fast lookup
+    restricted_set = Set(mu_rho_restricted)
+    # Prepare grid of all (mu, rho) pairs
+    all_points = [(mu, rho) for mu in mu_range, rho in rho_range]
+    # Separate restricted and unrestricted points
+    restricted_x = Float64[]
+    restricted_y = Float64[]
+    unrestricted_x = Float64[]
+    unrestricted_y = Float64[]
+    for (mu, rho) in all_points
+        if (mu, rho) in restricted_set
+            push!(restricted_x, mu)
+            push!(restricted_y, rho)
+        else
+            push!(unrestricted_x, mu)
+            push!(unrestricted_y, rho)
+        end
+    end
+    # Plot
+    scatter(unrestricted_x, unrestricted_y, color=:gray, label="Unrestricted", legend=:topright)
+    scatter!(restricted_x, restricted_y, color=:red, label="Restricted")
+    xlabel!("mu")
+    ylabel!("rho")
+    title!("mu-rho restricted points")
+end
+
+plot_mu_rho_restricted(mu_range, rho_range, mu_rho_restricted)
+
+
+###########################################################
+####################### Sec 5: Run ########################
+###########################################################
+
+# ------------------------------
+# --------- Single run ---------
 opts = get_user_options()
-run_selected_solver(opts, N_range, t_combinations, mu_range, Delta_range, sequences, sequence_name, path; precision=BigFloat_precision, chunk_size=chunk_size)
+run_selected_solver(opts, N_range, t_combinations, mu_range, Delta_range, sequences, sequence_name, path; precision=BigFloat_precision, chunk_size=chunk_size, param_restrictions=mu_rho_restricted)
+
+
+# # ------------------------------------------------------------------------------
+# # --------- Repeated runs for all sequences (comment out Sec 2 to use) ---------
+# sequence_list = [normal_sequence, golden_sequence, silver_sequence, thue_morse_sequence, plastic_sequence]
+# sequence_name_list = ["NC", "GQC", "SQC", "TMQC", "PQC"]
+
+# for (i, sequence) in enumerate(sequence_list)
+    
+#     sequence_name = sequence_name_list[i]
+#     sequences = [sequence]
+
+#     # generate data save path
+#     root_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data"
+#     folder_name = "np/all_crystal_grad_testruns/mu_vs_rho_mp_heatmaps/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t2_range))__t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+#     path = "$(root_path)/$(folder_name)/"
+
+#     # Create the folder if it doesn't exist
+#     isdir(path) || mkpath(path)
+
+#     # run simulation
+#     opts = get_user_options()
+#     run_selected_solver(opts, N_range, t_combinations, mu_range, Delta_range, sequences, sequence_name, path; precision=BigFloat_precision, chunk_size=chunk_size)
+# end

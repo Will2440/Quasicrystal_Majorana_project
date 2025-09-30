@@ -83,7 +83,7 @@ function plt_mp_generalised(df::DataFrame, x_variable::Symbol, filename::String;
     Plots.savefig(filename)
 end
 
-function plt_mp_heatmap(df::DataFrame, colour_var::Symbol, x_variable::Symbol, y_variable::Symbol, filename::String; fixed_values...)
+function plt_mp_heatmap(df::DataFrame, colour_var::Symbol, x_variable::Symbol, y_variable::Symbol, filename::String, title::String; fixed_values...)
     """
     Plots Majorana Polarization (MP) as a heatmap with specified x and y variables.
 
@@ -132,7 +132,10 @@ function plt_mp_heatmap(df::DataFrame, colour_var::Symbol, x_variable::Symbol, y
         y_values, 
         value_matrix, 
         xlabel=string(x_variable), 
-        ylabel=string(y_variable), 
+        ylabel=string(y_variable),
+        # xlabel=L"\mu/t_A",
+        # ylabel=L"\rho",
+        title=title,
         color=:viridis,
         clims=(minimum(value_matrix), maximum(value_matrix)), # (0.0, 1.0),
         colorbar=true,
@@ -316,45 +319,77 @@ end
 ########### Sec 2: Standard Plotting Processes ############
 ###########################################################
 
+
 function standard_plotting(
     df::DataFrame,
-    N::Int,
-    rho::Float64,
-    Delta::Float64,
     seq_name::String,
-    filepath::String
+    mp_tol::Float64,
+    filepath::String;
+    N::Int64=50,
+    rho::Float64=1.5,
+    Delta::Float64=0.1,
 )
     rho_safe = replace(string(rho), "." => "p")
     Delta_safe = replace(string(Delta), "." => "p")
 
-    # mp_integral = calc_integral_under_curve(df, :mp_disc, :mu_t, :rho, N=N, Delta_t=Delta)#, sequence_name=seq_name)
-    # ipr_integral = calc_integral_under_curve(df, :ipr_disc, :mu_t, :rho, N=N, Delta_t=Delta)#, sequence_name=seq_name)
-    # mbs_integral = calc_integral_under_curve(df, :mbs_gap_disc, :mu_t, :rho, N=N, Delta_t=Delta)#, sequence_name=seq_name)
-
-    # filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_integrals.csv"
-    # save_integrals_to_csv(filename, mp_integral, ipr_integral, mbs_integral)
-
-
-    filename = "$(filepath)_$(seq_name)_N$(N)_rho$(rho_safe)_Delta$(Delta_safe)_mp_line"
-    plt_mp_generalised(df, :mu_t, filename, N=N, rho=rho, Delta_t=Delta)#, sequence_name=seq_name)
+    # filename = "$(filepath)_$(seq_name)_N$(N)_rho$(rho_safe)_Delta$(Delta_safe)_mp_line"
+    # plt_mp_generalised(df, :mu_t, filename, N=N, rho=rho, Delta_t=Delta)#, seq_name=seq_name)
 
     filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_mp"
-    plt_mp_heatmap(df, :mp, :mu_t, :rho, filename, N=N, Delta_t=Delta)#, sequence_name=seq_name)
+    plt_mp_heatmap(df, :mp, :mu_t, :rho, filename, "MP for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
 
     filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_mp_disc"
-    plt_mp_heatmap(df, :mp_disc, :mu_t, :rho, filename, N=N, Delta_t=Delta)#, sequence_name=seq_name)
+    plt_mp_heatmap(df, :mp_disc, :mu_t, :rho, filename, "MP discretised (tol=$mp_tol) for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
 
     filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_ipr"
-    plt_mp_heatmap(df, :ipr, :mu_t, :rho, filename, N=N, Delta_t=Delta)#, sequence_name=seq_name)
+    plt_mp_heatmap(df, :ipr, :mu_t, :rho, filename, "IPR for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
 
     filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_ipr_disc"
-    plt_mp_heatmap(df, :ipr_masked, :mu_t, :rho, filename, N=N, Delta_t=Delta)#, sequence_name=seq_name)
+    plt_mp_heatmap(df, :ipr_masked, :mu_t, :rho, filename, "IPR phase masked (MP tol=$mp_tol) for $(seq_name) N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
 
     filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_mbs_gap"
-    plt_mp_heatmap(df, :maj_gap, :mu_t, :rho, filename, N=N, Delta_t=Delta)#, sequence_name=seq_name)
+    plt_mp_heatmap(df, :maj_gap, :mu_t, :rho, filename, "MBS gap for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
 
-    filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_mbs_gap_disc"
-    plt_mp_heatmap_mbs_disc_final(df, :maj_gap_masked, :mu_t, :rho, filename, N=N, Delta_t=Delta)#, sequence_name=seq_name)
+    # filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_mbs_gap_disc"
+    # plt_mp_heatmap_mbs_disc_final(df, :maj_gap_masked, :mu_t, :rho, filename, "MBS gap masked (MP tol=$mp_tol) for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
+
+    return
+end
+
+function standard_plotting_PQC(
+    df::DataFrame,
+    seq_name::String,
+    mp_tol::Float64,
+    filepath::String;
+    N::Int64=50,
+    rho::Float64=1.5,
+    sigma::Float64=2.0,
+    Delta::Float64=0.1,
+)
+    rho_safe = replace(string(rho), "." => "p")
+    sig_safe = replace(string(sigma), "." => "p")
+    Delta_safe = replace(string(Delta), "." => "p")
+
+    # filename = "$(filepath)_$(seq_name)_N$(N)_rho$(rho_safe)_Delta$(Delta_safe)_mp_line"
+    # plt_mp_generalised(df, :mu_t, filename, N=N, rho=rho, Delta_t=Delta)#, seq_name=seq_name)
+
+    filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_mp"
+    plt_mp_heatmap(df, :mp, :mu_t, :rho, filename, "MP for $(seq_name), sigma=$sigma, N=$N, Delta=$Delta"; N=N, Delta_t=Delta, sigma=sigma)#, seq_name=seq_name)
+
+    filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_mp_disc"
+    plt_mp_heatmap(df, :mp_disc, :mu_t, :rho, filename, "MP discretised (tol=$mp_tol) for $(seq_name), sigma=$sigma, N=$N, Delta=$Delta"; N=N, Delta_t=Delta, sigma=sigma)#, seq_name=seq_name)
+
+    filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_ipr"
+    plt_mp_heatmap(df, :ipr, :mu_t, :rho, filename, "IPR for $(seq_name), sigma=$sigma, N=$N, Delta=$Delta"; N=N, Delta_t=Delta, sigma=sigma)#, seq_name=seq_name)
+
+    filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_ipr_disc"
+    plt_mp_heatmap(df, :ipr_masked, :mu_t, :rho, filename, "IPR phase masked (MP tol=$mp_tol) for $(seq_name), sigma=$sigma, N=$N, Delta=$Delta"; N=N, Delta_t=Delta, sigma=sigma)#, seq_name=seq_name)
+
+    filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_mbs_gap"
+    plt_mp_heatmap(df, :maj_gap, :mu_t, :rho, filename, "MBS gap for $(seq_name), N=$N, sigma=$sigma, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
+
+    # filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_mbs_gap_disc"
+    # plt_mp_heatmap_mbs_disc_final(df, :maj_gap_masked, :mu_t, :rho, filename, "MBS gap masked (MP tol=$mp_tol) for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
 
     return
 end
@@ -364,14 +399,31 @@ end
 ###################### Sec 3: Run #########################
 ###########################################################
 
-filepath = "simulations/raw_data/test_folder_np/"
+filepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/all_crystal_grad_testruns/restricted_mu_vs_rho_mp_heatmaps/GQC_N(50-50-1)_t1(1.0-1.0-101__t2(0.0-10.0-101)_mu(0.0-10.0-101)_Delta(0.0-2.0-21)/"
 mp_tol = 0.1
 df = unpack_bason_standard(filepath; mp_tol=mp_tol)
 
 
 N = 50
-rho = 1.5
 seq_name = "GQC"
-Delta=0.1
+Delta=0.5
 
-standard_plotting(df, N, rho, Delta, seq_name, filepath)
+# # One instance
+# standard_plotting(df, seq_name, mp_tol, filepath; Delta=Delta)
+
+# Instances of all Delta
+Delta_range = collect(range(0.0, 2.0, 21))
+for Delta in Delta_range
+    standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta)
+end
+
+
+# # Instances of Delta and sigma for PQC
+# Delta_range = collect(range(0.0, 2.0, 21))
+# sigma_range = [2.0, 3.0, 4.0]
+# seq_name = "PQC"
+# for sigma in sigma_range
+#     for Delta in Delta_range
+#         standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta, sigma=sigma)
+#     end
+# end

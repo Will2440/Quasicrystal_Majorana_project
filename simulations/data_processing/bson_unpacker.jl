@@ -29,11 +29,6 @@ using Glob
 ############## Sec 1: Auxilliary Functions ################
 ###########################################################
 
-function calc_rho(t_n::Vector{Float64})
-    rho = t_n[2] / t_n[1]
-    return rho
-end
-
 function normalise_to_t(t_n::Vector{Float64})
     norm = t_n[1]
     return norm
@@ -84,6 +79,12 @@ function calc_norms_df!(df::DataFrame)
     df.mu_t = [row.mu / row.t_n[1] for row in eachrow(df)]
     df.Delta_t = [row.Delta / row.t_n[1] for row in eachrow(df)]
 
+    if length(df.t_n[1]) == 3
+        df.sigma = [row.t_n[3] / row.t_n[1] for row in eachrow(df)]
+    else
+        nothing
+    end
+
     return df
 end
 
@@ -110,11 +111,13 @@ function unpack_bason_standard(folder_path::String; mp_tol=1e-5)
     df = calc_norms_df!(df)
     df = calc_mp_disc!(df, mp_tol)
     df = mask_df!(df)
+
+    println("DataFrame keynames: $(names(df))")
     return df
 end
 
 #  # Example Usage
-# folder_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/hp/test_folder_hp_all_calcs"
+# folder_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/all_crystal_grad_testruns/mu_vs_rho_mp_heatmaps/PQC_N(50-50-1)_t1(1.0-1.0-101__t2(0.0-10.0-101)_mu(0.0-10.0-101)_Delta(0.0-2.0-21)"
 # mp_tol = 0.1
-# df = unpack_bson_to_dataframe(folder_path; mp_tol=mp_tol)
+# df = unpack_bason_standard(folder_path; mp_tol=mp_tol)
 

@@ -11,7 +11,7 @@
 using .LocalSolv
 
 
-function run_selected_solver(opts::UserOptions, N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, filepath; precision=512, chunk_size=1000)
+function run_selected_solver(opts::UserOptions, N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, filepath; precision=512, chunk_size=1000, param_restrictions)
 
 	if opts.solver_type == :generic
 		if opts.calc_precision == :np
@@ -47,9 +47,17 @@ function run_selected_solver(opts::UserOptions, N_range, t_n_range, mu_range, De
 		else
 			error("Unknown precision mode: $(opts.calc_precision)")
 		end
-
-		else
-			error("Unknown solver type: $(opts.solver_type)")
-		end
+    elseif opts.solver_type == :restricted
+        if opts.calc_precision == :np
+            if mu_rho_restricted === nothing
+                error("mu_rho_restricted parameter must be provided for :np_restricted solver.")
+            end
+            LocalSolv.np_mu_rho_restricted_solver(N_range, t_n_range, mu_range, mu_rho_restricted, Delta_range, sequences, sequence_name, chunk_size, filepath, opts)
+        else
+            error(":restricted solver only supports normal precision (:np).")
+        end
+    else
+        error("Unknown solver type: $(opts.solver_type)")
+    end
 
 end
