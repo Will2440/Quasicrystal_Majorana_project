@@ -1,11 +1,11 @@
 """
     file name:   solver.jl
     created:     24/09/2025
-    last edited: 25/09/2025
+    last edited: 30/09/2025
 
     overview:
         This file generates an importable module containing all of the calculations relevant to the analysing Majoranas in the Kitaev chain.
-        Only the solcing functions of Sec 3 are exported for use outside of this module.
+        Only the solving functions of Sec 3 are exported for use outside of this module.
     
     structure:
         Sec 1:  Constructing the Hamiltonian
@@ -18,7 +18,9 @@
                         - :generic
                             This solver type iterates over all parameter combinations in a single disordered for loop, saving results in chunks to avoid memory issues.
                             It is the most flexible but may not be the most efficient for specific parameter sweeps.
-                        - :mu_loop
+                        - :restricted
+                            This solver type is designed for sweeping over a 2D parameter space (e.g., mu vs rho) with restrictions applied to limit the parameter combinations based on user-defined rules.
+                            It is useful to reduce computational cost when there are large regions of parameter space that are known to be trivial.
                             This solver type is optimized for sweeping over chemical potential (mu) while keeping other parameters fixed.
                             It is useful for studying phase transitions as a function of mu. (N.B. this was initially designed for HPC batch jobs where a second parameter was varied between each job in the batch.)
                         - :N_loop

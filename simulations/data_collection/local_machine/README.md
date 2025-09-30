@@ -34,7 +34,6 @@ This folder contains the following scripts
 
 ## Work in Progress
 
-[25/09/2025]
+[30/09/2025]
 - Only the hp and np_generic_solver functions are tested fully integrated with the UserOptions architecture. The mu_loop and N_loop functions need to be updated.
-  - Want to change hp and np_generic_solver functions so that the logic for what is calculated and saved happens once outside the for loop, not each time within it.
 - Need to add the Arpack routine versions of the solving function.

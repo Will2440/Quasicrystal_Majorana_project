@@ -1,7 +1,7 @@
 """
     file name:   main.jl
     created:     25/09/2025
-    last edited: 25/09/2025
+    last edited: 30/09/2025
 
     overview:
         The main script to execute simulations on a local machine. Define parameter ranges and decide on calculation and datasaving requirements to call on the correct functions.
@@ -13,13 +13,18 @@
                     Ddefine data save filepath
         - Sec 3:  Tailoring
                     Answer list of options relating to exactly what values should be calculated and saved, in what precision and using which solver type.
+        - Sec 4:  Cut Parameters
+                    (Optional) Define cutting rules to restrict parameter space for :restricted solver type
+        - Sec 5:  Run
+                    Call on the dispatch function to run the selected solver with all of the above parameters and options
     
     usage instructions:
         1) Ensure the local_machine environment is initialised by running simulations/data_collection/local_machine/__init__.jl ONCE per Julia session.
         2) Complete Sec 1 to define your desired parameter ranges
         3) Check Sec 2 to ensure the data save path is correct (it will typically self-generate a folder name based on the parameters chosen)
         4) Complete Sec 3 to choose what calculations to perform, in what precision and using which solver type (for more details on solver types see the lead comments in solvers.jl)
-        5) Run this script to execute the simulations and save the data
+        (5) (Optional) Complete Sec 4 to define cutting rules to restrict parameter space for :restricted solver type for less expensive 2D param space solving.)
+        6) Run this script with the code in Sec 5 to execute the simulations and save the data
 """
 
 using .SeqGen

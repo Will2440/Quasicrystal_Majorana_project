@@ -41,23 +41,23 @@ end
 
 function restrict_range(xs::Vector{Float64}, ys::Vector{Float64}, cuts::Vector{Dict{Symbol, Any}})
     """
-    restrict_range(xs, ys, cuts)
+        restrict_range(xs, ys, cuts)
 
-    Filter points in the 2D parameter space defined by `xs` and `ys` according to 
-    a list of cutting rules.
+        Filter points in the 2D parameter space defined by `xs` and `ys` according to 
+        a list of cutting rules.
 
-    # Arguments
-    - `xs::Vector{Float64}`: x values
-    - `ys::Vector{Float64}`: y values
-    - `cuts::Vector{Dict}`: list of cutting rules. Each rule is a Dict with keys:
-        - `:gradient` (slope of line)
-        - `:y_intercept` (intercept of line)
-        - `:x_range` (Tuple `(xmin, xmax)` where the rule applies)
-        - `:y_range` (Tuple `(ymin, ymax)` where the rule applies)
-        - `:cut_which_side` (`"above"` or `"below"`)
+        # Arguments
+        - `xs::Vector{Float64}`: x values
+        - `ys::Vector{Float64}`: y values
+        - `cuts::Vector{Dict}`: list of cutting rules. Each rule is a Dict with keys:
+            - `:gradient` (slope of line)
+            - `:y_intercept` (intercept of line)
+            - `:x_range` (Tuple `(xmin, xmax)` where the rule applies)
+            - `:y_range` (Tuple `(ymin, ymax)` where the rule applies)
+            - `:cut_which_side` (`"above"` or `"below"`)
 
-    # Returns
-    - A vector of tuples `(x, y)` that survive all cuts.
+        # Returns
+        - A vector of tuples `(x, y)` that survive all cuts.
     """
 
     points = [(x, y) for x in xs, y in ys]
