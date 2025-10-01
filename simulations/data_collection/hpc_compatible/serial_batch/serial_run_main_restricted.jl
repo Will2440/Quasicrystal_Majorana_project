@@ -44,7 +44,7 @@ end
 ##############################################
 # # check here # #
 ##############################################
-hpSerialSolver.hp_serial_solver_mu_loop(
+# hpSerialSolver.hp_serial_solver_mu_loop()
 
 params_filename = "/user/home/hb21877/Majorana_solver_for_BlueCrystal/serial_compute/param_sets/mu_loop_sets/final_abundance_sets/params_PQC_N50_mu0.0-10.0-201_rho0.0-10.0-201_sig2.0_Delta[0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0].dat"
 ##############################################
