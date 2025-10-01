@@ -117,7 +117,9 @@ function unpack_bason_standard(folder_path::String; mp_tol=1e-5)
 end
 
 #  # Example Usage
-folder_path = "../../raw_data/np/all_crystal_grad_testruns/mu_vs_rho_mp_heatmaps/PQC_N(50-50-1)_t1(1.0-1.0-101__t2(0.0-10.0-101)_mu(0.0-10.0-101)_Delta(0.0-2.0-21)"
+script_dir = @__DIR__              # e.g. folder1/folder1_1
+folder_path = joinpath(script_dir, "../raw_data/np/all_crystal_grad_testruns/restricted_mu_vs_rho_mp_heatmaps/GQC_N10-10-1_t11.0-1.0-1__t20.0-10.0-101_mu0.0-10.0-101)_Delta0.0-2.0-3")
+println("Unpacking data from folder: $folder_path")
 mp_tol = 0.1
 df = unpack_bason_standard(folder_path; mp_tol=mp_tol)
 
