@@ -56,8 +56,8 @@ N_range = [50]
 ## t_n Range (combine any number of different hopping ranges)
 t1_range = collect(range(1.0, 1.0, 1))
 t2_range = collect(range(0.0, 10.0, 101))
-# t3_range = [2.0, 3.0, 4.0]
-t_ranges = [t1_range, t2_range]#, t3_range]
+t3_range = [4.0] #[2.0, 3.0, 4.0]
+t_ranges = [t1_range, t2_range, t3_range]
 t_combinations_1 = ParamCombGen.t_ranges_combs(t_ranges)
 
 # t1_range = collect(range(0.01, 0.99, 99))
@@ -76,8 +76,8 @@ mu_range = collect(range(0.0, 10.0, length=101))
 
 
 ## Delta Range (even single value must be a vector type)
-# Delta_range = [0.1] 
-Delta_range = collect(range(0.0, 2.0, 21)) 
+Delta_range = [2.0] 
+# Delta_range = collect(range(0.0, 2.0, 21)) 
 #log_range(10.0, 0.0, 0.0, 1)
 
 
@@ -91,8 +91,8 @@ Delta_range = collect(range(0.0, 2.0, 21))
 
 
 ## Sequence Definition (chosoe which standard hopping sequence to use)
-sequences = [golden_sequence]
-sequence_name = "GQC"
+sequences = [plastic_sequence]
+sequence_name = "PQC"
 
 
 ## Set Precision for hp calculations
@@ -109,8 +109,8 @@ chunk_size = 1000
 ###########################################################
 
 
-root_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/dump"
-folder_name = "np/all_crystal_grad_testruns/restricted_mu_vs_rho_mp_heatmaps/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t2_range))__t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+root_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/"
+folder_name = "np/all_crystal_grad_testruns/restricted_mu_vs_rho_mp_heatmaps/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t2_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
 path = "$(root_path)/$(folder_name)/"
 
 # Create the folder if it doesn't exist
@@ -132,7 +132,7 @@ function get_user_options()
         :np,     # calc_precision: :hp, :np
         :maj_np, # save_evecs: :all_np, :all_hp, :maj_np, :maj_hp, :none
         :maj_np, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
-        :generic # solver_type: :generic, :mu_loop, :N_loop, :restricted
+        :restricted # solver_type: :generic, :mu_loop, :N_loop, :restricted
     )
 end
 
@@ -149,33 +149,11 @@ rho_range = collect(range(rho_min, rho_max, length(t2_range)))
 
 xs = mu_range
 ys = rho_range
-grad1 = ParamCombGen.angle_to_gradient(45.0)
+grad1 = ParamCombGen.angle_to_gradient(35.0)
 grad2 = ParamCombGen.angle_to_gradient(45.0)
-GQC_cuts = [
-    Dict(
-        :gradient => grad1,
-        :y_intercept => -2.0,
-        :x_range => (2.5, maximum(xs)),
-        :y_range => (0.0, maximum(ys)),
-        :cut_which_side => "below"
-    ),
-    Dict(
-        :gradient => grad2,
-        :y_intercept => 2.0,
-        :x_range => (2.5, maximum(xs)),
-        :y_range => (5.0, maximum(ys)),
-        :cut_which_side => "above"
-    ),
-    Dict(
-        :gradient => -10.0,
-        :y_intercept => 30.0,
-        :x_range => (minimum(xs), 2.5),
-        :y_range => (6.0, maximum(ys)),
-        :cut_which_side => "above"
-    )
-]
+cuts = GQC_D01_cuts # see auxilliary/param_restriction_cuts.jl for predefined cutting rules
 
-mu_rho_restricted = ParamCombGen.restrict_range(xs, ys, GQC_cuts)
+mu_rho_restricted = ParamCombGen.restrict_range(xs, ys, cuts)
 
 
 # Function to check the output of cuts before proceeding with simulation
