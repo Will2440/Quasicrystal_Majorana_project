@@ -1,31 +1,36 @@
-"""
-    file name:   main.jl
-    created:     25/09/2025
-    last edited: 30/09/2025
 
-    overview:
-        The main script to execute simulations on a local machine. Define parameter ranges and decide on calculation and datasaving requirements to call on the correct functions.
+    # file name:   main.jl
+    # created:     25/09/2025
+    # last edited: 30/09/2025
+
+    # overview:
+    #     The main script to execute simulations on a local machine. Define parameter ranges and decide on calculation and datasaving requirements to call on the correct functions.
     
-    structure:
-        - Sec 1:  Parameter Choice
-                    Generate all sequence types and define parameter ranges for N, t_n, mu and Delta
-        - Sec 2:  Data Save Path  
-                    Ddefine data save filepath
-        - Sec 3:  Tailoring
-                    Answer list of options relating to exactly what values should be calculated and saved, in what precision and using which solver type.
-        - Sec 4:  Cut Parameters
-                    (Optional) Define cutting rules to restrict parameter space for :restricted solver type
-        - Sec 5:  Run
-                    Call on the dispatch function to run the selected solver with all of the above parameters and options
+    # structure:
+    #     - Sec 1:  Parameter Choice
+    #                 Generate all sequence types and define parameter ranges for N, t_n, mu and Delta
+    #     - Sec 2:  Data Save Path  
+    #                 Ddefine data save filepath
+    #     - Sec 3:  Tailoring
+    #                 Answer list of options relating to exactly what values should be calculated and saved, in what precision and using which solver type.
+    #     - Sec 4:  Cut Parameters
+    #                 (Optional) Define cutting rules to restrict parameter space for :restricted solver type
+    #     - Sec 5:  Run
+    #                 Call on the dispatch function to run the selected solver with all of the above parameters and options
     
-    usage instructions:
-        1) Ensure the local_machine environment is initialised by running simulations/data_collection/local_machine/__init__.jl ONCE per Julia session.
-        2) Complete Sec 1 to define your desired parameter ranges
-        3) Check Sec 2 to ensure the data save path is correct (it will typically self-generate a folder name based on the parameters chosen)
-        4) Complete Sec 3 to choose what calculations to perform, in what precision and using which solver type (for more details on solver types see the lead comments in solvers.jl)
-        (5) (Optional) Complete Sec 4 to define cutting rules to restrict parameter space for :restricted solver type for less expensive 2D param space solving.)
-        6) Run this script with the code in Sec 5 to execute the simulations and save the data
-"""
+    # usage instructions:
+    #     1) Ensure the local_machine environment is initialised by running simulations/data_collection/local_machine/__init__.jl ONCE per Julia session.
+    #     2) Complete Sec 1 to define your desired parameter ranges
+    #     3) Check Sec 2 to ensure the data save path is correct (it will typically self-generate a folder name based on the parameters chosen)
+    #     4) Complete Sec 3 to choose what calculations to perform, in what precision and using which solver type (for more details on solver types see the lead comments in solvers.jl)
+    #     (5) (Optional) Complete Sec 4 to define cutting rules to restrict parameter space for :restricted solver type for less expensive 2D param space solving.)
+    #     6) Run this script with the code in Sec 5 to execute the simulations and save the data
+script_dir = @__DIR__              # e.g. folder1/folder1_1
+include(joinpath(script_dir, "../../data_collection/local_machine/solvers.jl"))
+include(joinpath(script_dir, "../../data_collection/local_machine/compute.jl"))
+include(joinpath(script_dir, "../../data_collection/auxilliary/sequence_gen.jl"))
+include(joinpath(script_dir, "../../data_collection/auxilliary/param_comb_gen.jl"))
+
 
 using .SeqGen
 using .ParamCombGen
@@ -48,7 +53,7 @@ plastic_sequence = SeqGen.plastic_SeqGen(N_seq_seed)
 
 
 ## N Range (even single value must be a Vector type)
-N_range = [50]
+N_range = [15]
 #collect(Int, range(55,55,1))
 #floor.(Int, log_range(2.0, 3.0, 7.0, 10))
 
@@ -77,7 +82,7 @@ mu_range = collect(range(0.0, 10.0, length=101))
 
 ## Delta Range (even single value must be a vector type)
 # Delta_range = [0.1] 
-Delta_range = collect(range(0.0, 2.0, 21)) 
+Delta_range = collect(range(0.0, 2.0, 3)) 
 #log_range(10.0, 0.0, 0.0, 1)
 
 
@@ -109,13 +114,17 @@ chunk_size = 1000
 ###########################################################
 
 
-root_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/dump"
-folder_name = "np/all_crystal_grad_testruns/restricted_mu_vs_rho_mp_heatmaps/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t2_range))__t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+root_path = joinpath(script_dir, "../../../simulations/raw_data")
+# root_path = "/Users/mas/Documents/Research/projects/Majoranas/Quasicrystal_Majorana_project/simulations/raw_data"
+folder_name = "np/all_crystal_grad_testruns/restricted_mu_vs_rho_mp_heatmaps/$(sequence_name)_N$(N_range[1])-$(N_range[end])-$(length(N_range))_t1$(t1_range[1])-$(t1_range[end])-$(length(t1_range))__t2$(t2_range[1])-$(t2_range[end])-$(length(t2_range))_mu$(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta$(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range))"
 path = "$(root_path)/$(folder_name)/"
 
 # Create the folder if it doesn't exist
-isdir(path) || mkpath(path)
-
+# println("Data will be saved to path: $path\n")
+# println("The path exists: $(isdir(path))\n")
+#isdir(path) || mkpath(path)
+# Only create if it does not exist
+run(`bash -c 'if [ ! -d "$1" ]; then mkdir "$1"; fi' _ $path`)
 
 
 ###########################################################
