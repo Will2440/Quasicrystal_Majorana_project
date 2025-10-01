@@ -10,7 +10,9 @@ using DelimitedFiles
 row_index = parse(Int64,ARGS[1]);
 
 
-# seqeunce generation
+###########################################################
+############### Sec 1: seqeunce Generation ################
+###########################################################
 N_seq_seed = 1024
 normal_sequence = SeqGen.normal_SeqGen(N_seq_seed)
 golden_sequence = SeqGen.golden_SeqGen(N_seq_seed)

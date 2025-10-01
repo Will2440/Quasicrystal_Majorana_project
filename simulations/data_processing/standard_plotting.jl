@@ -399,23 +399,24 @@ end
 ###################### Sec 3: Run #########################
 ###########################################################
 
-filepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/all_crystal_grad_testruns/restricted_mu_vs_rho_mp_heatmaps/GQC_N(50-50-1)_t1(1.0-1.0-101__t2(0.0-10.0-101)_mu(0.0-10.0-101)_Delta(0.0-2.0-21)/"
+filepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/all_crystal_grad_testruns/restricted_mu_vs_rho_mp_heatmaps/PQC_N(50-50-1)_t1(1.0-1.0-101_t2(0.0-10.0-101)_mu(0.0-10.0-101)_Delta(2.0-2.0-1)/"
 mp_tol = 0.1
 df = unpack_bason_standard(filepath; mp_tol=mp_tol)
 
 
 N = 50
-seq_name = "GQC"
-Delta=0.5
+seq_name = "PQC"
+Delta=2.0
 
-# # One instance
+# One instance
 # standard_plotting(df, seq_name, mp_tol, filepath; Delta=Delta)
+standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta, sigma=4.0)
 
-# Instances of all Delta
-Delta_range = collect(range(0.0, 2.0, 21))
-for Delta in Delta_range
-    standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta)
-end
+# # Instances of all Delta
+# Delta_range = collect(range(0.0, 2.0, 21))
+# for Delta in Delta_range
+#     standard_plotting(df, seq_name, mp_tol, filepath; Delta=Delta)
+# end
 
 
 # # Instances of Delta and sigma for PQC

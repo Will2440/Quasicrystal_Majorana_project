@@ -1,6 +1,6 @@
 module hpSerialSolver
 
-export hp_serial_solver_mu_loop, hp_serial_solver_N_loop, hp_serial_solver_N_loop_threaded
+export hp_serial_solver_mu_loop, hp_serial_solver_N_loop, hp_serial_solver_N_loop_threaded, hp_mu_rho_restricted_solver
 
 using GenericLinearAlgebra
 using LinearAlgebra
@@ -9,23 +9,6 @@ using DataFrames
 using BSON: @save, @load
 # using ProgressMeter
 
-
-# function golden_ratio_sequence_gen(N::Int)
-#     sequence = "A"
-#     while length(sequence) < N
-#         sequence = replace(sequence, "A" => "AB", "B" => "A")
-#     end
-#     # println(sequence)
-    
-#     number_sequence = [ch == 'A' ? 1 : 2 for ch in sequence]
-    
-#     return number_sequence
-# end
-
-# N_gold = 1000
-# golden_sequence = golden_ratio_sequence_gen(N_gold)
-# # println("Golden ratio sequence: ", golden_sequence)
-# println("Sequence length: ", length(golden_sequence))
 
 
 function hp_create_bdg_hamiltonian_generalised(
@@ -360,9 +343,103 @@ function hp_serial_solver_N_loop_threaded(
     return nothing
 end
 
+function hp_mu_rho_restricted_solver(
+    N::Int,
+    # t_n_range::Vector{Vector{Float64}},
+    # mu_range::Vector{Float64},
+    unrestricted_points::Vector{Tuple{Float64, Float64}},
+    Delta::Float64,
+    sequence::Vector{Int},
+    sequence_name::String,
+    precision::Int,
+    filepath::String
+)
+
+    # Initialize DataFrame for results
+    results_df = DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        mp = Float64[],
+        maj_gap = Float64[],
+        ipr = Float64[],
+        loc_len = Float64[],
+        eigenvalues = Union{Vector{Float64}, Missing}[],
+        eigenvectors = Union{Matrix{Float64}, Missing}[]
+    )
+
+    for point in unrestricted_points
+
+        mu = point[1]
+        t_n = [1.0, point[2]]
+
+        truncated_sequence = Vector(sequence[1:N])
+        BdG = hp_create_bdg_hamiltonian_generalised(N, t_n, mu, Delta, truncated_sequence, precision)
+        eigenvalues, eigenvectors = GenericLinearAlgebra.eigen(Hermitian(BdG))
+
+
+        eigenvalues = real.(eigenvalues)
+        eigenvectors = real.(eigenvectors)
+
+        mp = hp_calc_maj_mp(eigenvectors)
+        maj_ipr = hp_calc_maj_ipr(eigenvectors)
+        gap = hp_calc_mbs_energy_gap(eigenvalues)
+        # println("pushing mu value: $mu")
+
+        push!(results_df, (
+            N = N,
+            t_n = t_n,
+            mu = mu,
+            Delta = Delta,
+            sequence_name = sequence_name,
+            mp = mp,
+            maj_gap = gap,
+            ipr = maj_ipr,
+            loc_len = NaN,
+            eigenvalues = missing,
+            eigenvectors = missing
+        ))
+    end
+
+    m1 = minimum(mu_range)
+    m2 = maximum(mu_range)
+    l = length(mu_range)
+
+    t1 = t_n[1]
+    t2 = t_n[2]
+
+    filename = "$(sequence_name)_N$(N)_tn$(t1)_$(t2)_Delta$(Delta)_mu$(m1)-$(m2)_$(l).bson"
+    filepath = "$(filepath)$(filename)"
+
+    @save filepath results_df
+
+    return nothing
+end
+
 
 
 end
+
+
+# function golden_ratio_sequence_gen(N::Int)
+#     sequence = "A"
+#     while length(sequence) < N
+#         sequence = replace(sequence, "A" => "AB", "B" => "A")
+#     end
+#     # println(sequence)
+    
+#     number_sequence = [ch == 'A' ? 1 : 2 for ch in sequence]
+    
+#     return number_sequence
+# end
+
+# N_gold = 1000
+# golden_sequence = golden_ratio_sequence_gen(N_gold)
+# # println("Golden ratio sequence: ", golden_sequence)
+# println("Sequence length: ", length(golden_sequence))
+
 
 # N = 20
 # t_n = [1.0, 2.0]

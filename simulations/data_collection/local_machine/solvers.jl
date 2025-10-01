@@ -759,12 +759,9 @@ function hp_mu_rho_restricted_solver(
 )
     """
         Notes:
-            - np_generic_solver iterates over all possible parameter ranges idnescriminately, hence 'generic'.
-            - The use of thread IDs to distribute tasks and data storage shoul donly be used on local machines where such ID-ing is known
-            - This can be used when the optimal loop method is not known or not needed.
+            
         CAUTION: 
-            - This ProgressMeter @showprogress may not give accurate representation of time remaining if disordered parameter looping results in variation in loop time over runtime.
-            - The chunk_size must be sufficiently small to not exceed the memory allocated to this task (again paying attention to idnescriminate loop orders).
+
     """
 
     # Thread-local data store
