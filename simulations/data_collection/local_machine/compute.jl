@@ -54,7 +54,10 @@ function run_selected_solver(opts::UserOptions, N_range, t_n_range, mu_range, De
             end
             LocalSolv.np_mu_rho_restricted_solver(N_range, t_n_range, mu_range, mu_rho_restricted, Delta_range, sequences, sequence_name, chunk_size, filepath, opts)
         else
-            error(":restricted solver only supports normal precision (:np).")
+            if mu_rho_restricted === nothing
+                error("mu_rho_restricted parameter must be provided for :hp_restricted solver.")
+            end
+            LocalSolv.hp_mu_rho_restricted_solver(N_range, t_n_range, mu_range, mu_rho_restricted, Delta_range, sequences, sequence_name, precision, chunk_size, filepath, opts)
         end
     else
         error("Unknown solver type: $(opts.solver_type)")

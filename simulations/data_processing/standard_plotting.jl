@@ -1,8 +1,10 @@
-include("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/data_processing/bson_unpacker.jl")
+include("bson_unpacker.jl")
 
 using Plots
 using LaTeXStrings
 using Measures
+using Base.Threads
+using ProgressMeter
 
 
 ###########################################################
@@ -341,14 +343,14 @@ function standard_plotting(
     filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_mp_disc"
     plt_mp_heatmap(df, :mp_disc, :mu_t, :rho, filename, "MP discretised (tol=$mp_tol) for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
 
-    filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_ipr"
-    plt_mp_heatmap(df, :ipr, :mu_t, :rho, filename, "IPR for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
+    # filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_ipr"
+    # plt_mp_heatmap(df, :ipr, :mu_t, :rho, filename, "IPR for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
 
-    filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_ipr_disc"
-    plt_mp_heatmap(df, :ipr_masked, :mu_t, :rho, filename, "IPR phase masked (MP tol=$mp_tol) for $(seq_name) N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
+    # filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_ipr_disc"
+    # plt_mp_heatmap(df, :ipr_masked, :mu_t, :rho, filename, "IPR phase masked (MP tol=$mp_tol) for $(seq_name) N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
 
-    filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_mbs_gap"
-    plt_mp_heatmap(df, :maj_gap, :mu_t, :rho, filename, "MBS gap for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
+    # filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_mbs_gap"
+    # plt_mp_heatmap(df, :maj_gap, :mu_t, :rho, filename, "MBS gap for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
 
     # filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_mbs_gap_disc"
     # plt_mp_heatmap_mbs_disc_final(df, :maj_gap_masked, :mu_t, :rho, filename, "MBS gap masked (MP tol=$mp_tol) for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
@@ -379,14 +381,14 @@ function standard_plotting_PQC(
     filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_mp_disc"
     plt_mp_heatmap(df, :mp_disc, :mu_t, :rho, filename, "MP discretised (tol=$mp_tol) for $(seq_name), sigma=$sigma, N=$N, Delta=$Delta"; N=N, Delta_t=Delta, sigma=sigma)#, seq_name=seq_name)
 
-    filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_ipr"
-    plt_mp_heatmap(df, :ipr, :mu_t, :rho, filename, "IPR for $(seq_name), sigma=$sigma, N=$N, Delta=$Delta"; N=N, Delta_t=Delta, sigma=sigma)#, seq_name=seq_name)
+    # filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_ipr"
+    # plt_mp_heatmap(df, :ipr, :mu_t, :rho, filename, "IPR for $(seq_name), sigma=$sigma, N=$N, Delta=$Delta"; N=N, Delta_t=Delta, sigma=sigma)#, seq_name=seq_name)
 
-    filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_ipr_disc"
-    plt_mp_heatmap(df, :ipr_masked, :mu_t, :rho, filename, "IPR phase masked (MP tol=$mp_tol) for $(seq_name), sigma=$sigma, N=$N, Delta=$Delta"; N=N, Delta_t=Delta, sigma=sigma)#, seq_name=seq_name)
+    # filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_ipr_disc"
+    # plt_mp_heatmap(df, :ipr_masked, :mu_t, :rho, filename, "IPR phase masked (MP tol=$mp_tol) for $(seq_name), sigma=$sigma, N=$N, Delta=$Delta"; N=N, Delta_t=Delta, sigma=sigma)#, seq_name=seq_name)
 
-    filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_mbs_gap"
-    plt_mp_heatmap(df, :maj_gap, :mu_t, :rho, filename, "MBS gap for $(seq_name), N=$N, sigma=$sigma, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
+    # filename = "$(filepath)_$(seq_name)_sig$(sig_safe)_N$(N)_Delta$(Delta_safe)_mbs_gap"
+    # plt_mp_heatmap(df, :maj_gap, :mu_t, :rho, filename, "MBS gap for $(seq_name), N=$N, sigma=$sigma, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
 
     # filename = "$(filepath)_$(seq_name)_N$(N)_Delta$(Delta_safe)_mbs_gap_disc"
     # plt_mp_heatmap_mbs_disc_final(df, :maj_gap_masked, :mu_t, :rho, filename, "MBS gap masked (MP tol=$mp_tol) for $(seq_name), N=$N, Delta=$Delta"; N=N, Delta_t=Delta)#, seq_name=seq_name)
@@ -399,32 +401,39 @@ end
 ###################### Sec 3: Run #########################
 ###########################################################
 
-filepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/all_crystal_grad_testruns/restricted_mu_vs_rho_mp_heatmaps/PQC_N(50-50-1)_t1(1.0-1.0-101_t2(0.0-10.0-101)_mu(0.0-10.0-101)_Delta(2.0-2.0-1)/"
+filepath = "change/" # have the / at the end!
 mp_tol = 0.1
 df = unpack_bason_standard(filepath; mp_tol=mp_tol)
 
-
 N = 50
-seq_name = "PQC"
-Delta=2.0
+seq_name = "GQC"
 
-# One instance
-# standard_plotting(df, seq_name, mp_tol, filepath; Delta=Delta)
-standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta, sigma=4.0)
+
+# # One instance
+# # Delta = 1.2
+# plots_savepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/abundance/PQC_N(50-50-1)_t1(1.0-1.0-1)_t2(0.0-15.0-151)_t3(3.0-3.0-1)_mu(0.0-15.0-151)_Delta(0.1-2.0-20)/"
+# # standard_plotting(df, seq_name, mp_tol, filepath; N=N, Delta=Delta)
+# for Delta in collect(range(0.1, 2.0, 20))
+#     standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta, sigma=3.0)
+# end
+
 
 # # Instances of all Delta
-# Delta_range = collect(range(0.0, 2.0, 21))
+# plots_savepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/abundance_data/GQC_N(50-50-1)_t1(1.0-1.0-1_t2(0.0-1000.0-1001)_mu(0.0-3.0-31)_Delta(0.5-0.5-1)/"
+# isdir(plots_savepath) || mkpath(plots_savepath)
+
+# Delta_range = collect(range(0.1, 2.0, 20))
 # for Delta in Delta_range
-#     standard_plotting(df, seq_name, mp_tol, filepath; Delta=Delta)
+#     standard_plotting(df, seq_name, mp_tol, plots_savepath; N=N, Delta=Delta)
 # end
 
 
-# # Instances of Delta and sigma for PQC
-# Delta_range = collect(range(0.0, 2.0, 21))
-# sigma_range = [2.0, 3.0, 4.0]
-# seq_name = "PQC"
-# for sigma in sigma_range
-#     for Delta in Delta_range
-#         standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta, sigma=sigma)
-#     end
-# end
+# Instances of Delta and sigma for PQC
+Delta_range = collect(range(0.0, 2.0, 21))
+sigma_range = [3.0] #[2.0, 3.0, 4.0]
+seq_name = "PQC"
+for sigma in sigma_range
+    for Delta in Delta_range
+        standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta, sigma=sigma)
+    end
+end

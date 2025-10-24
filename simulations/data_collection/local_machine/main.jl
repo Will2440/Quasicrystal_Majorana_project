@@ -1,7 +1,7 @@
 """
     file name:   main.jl
     created:     25/09/2025
-    last edited: 30/09/2025
+    last edited: 01/10/2025
 
     overview:
         The main script to execute simulations on a local machine. Define parameter ranges and decide on calculation and datasaving requirements to call on the correct functions.
@@ -19,13 +19,25 @@
                     Call on the dispatch function to run the selected solver with all of the above parameters and options
     
     usage instructions:
-        1) Ensure the local_machine environment is initialised by running simulations/data_collection/local_machine/__init__.jl ONCE per Julia session.
+        1) 
+            a) If running in VSCode or other persistent Julia REPL: Ensure the local_machine environment is initialised by running simulations/data_collection/local_machine/__init__.jl ONCE per Julia session. Comment OUT the inclusion preamble below.
+            b) If running directly from terminal command line ensure the inclusion preamble below is commented IN. Do not use __init__.jl
         2) Complete Sec 1 to define your desired parameter ranges
         3) Check Sec 2 to ensure the data save path is correct (it will typically self-generate a folder name based on the parameters chosen)
         4) Complete Sec 3 to choose what calculations to perform, in what precision and using which solver type (for more details on solver types see the lead comments in solvers.jl)
         (5) (Optional) Complete Sec 4 to define cutting rules to restrict parameter space for :restricted solver type for less expensive 2D param space solving.)
         6) Run this script with the code in Sec 5 to execute the simulations and save the data
 """
+
+project_root = @__DIR__
+######################################################################################################################
+# # Leave this in if running main.jl directly from the terminal commandline 
+# # Comment this out and use __init__.jl if running in VSCode
+include(joinpath(project_root, "../../data_collection/local_machine/solvers.jl"))
+include(joinpath(project_root, "../../data_collection/local_machine/compute.jl"))
+include(joinpath(project_root, "../../data_collection/auxilliary/sequence_gen.jl"))
+include(joinpath(project_root, "../../data_collection/auxilliary/param_comb_gen.jl"))
+######################################################################################################################
 
 using .SeqGen
 using .ParamCombGen
@@ -49,26 +61,14 @@ plastic_sequence = SeqGen.plastic_SeqGen(N_seq_seed)
 
 ## N Range (even single value must be a Vector type)
 N_range = [50]
-#collect(Int, range(55,55,1))
-#floor.(Int, log_range(2.0, 3.0, 7.0, 10))
 
 
 ## t_n Range (combine any number of different hopping ranges)
 t1_range = collect(range(1.0, 1.0, 1))
 t2_range = collect(range(0.0, 10.0, 101))
-t3_range = [4.0] #[2.0, 3.0, 4.0]
+t3_range = [0.001, 0.01, 0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0, 100.0] #[2.0, 3.0, 4.0]
 t_ranges = [t1_range, t2_range, t3_range]
-t_combinations_1 = ParamCombGen.t_ranges_combs(t_ranges)
-
-# t1_range = collect(range(0.01, 0.99, 99))
-# t2_range = collect(range(1.0, 1.0, 1))
-# t_ranges = [t1_range, t2_range]
-# t_combinations_2 = ParamCombGen.t_ranges_combs(t_ranges)
-# # println(t_combinations_2)
-# # println(length(t_combinations_2))
-
-# t_combinations = vcat(t_combinations_1, t_combinations_2)
-t_combinations = t_combinations_1
+t_combinations = ParamCombGen.t_ranges_combs(t_ranges)
 
 
 ## mu Range (even single calue must be a Vector type)
@@ -76,9 +76,7 @@ mu_range = collect(range(0.0, 10.0, length=101))
 
 
 ## Delta Range (even single value must be a vector type)
-Delta_range = [2.0] 
-# Delta_range = collect(range(0.0, 2.0, 21)) 
-#log_range(10.0, 0.0, 0.0, 1)
+Delta_range = collect(range(0.1, 2.0, 20))
 
 
 ## Sequence Chunking (use this to generate sequence samples which can be compared)
@@ -90,7 +88,7 @@ Delta_range = [2.0]
 # end
 
 
-## Sequence Definition (chosoe which standard hopping sequence to use)
+## Sequence Definition (choose which standard hopping sequence to use)
 sequences = [plastic_sequence]
 sequence_name = "PQC"
 
@@ -108,14 +106,17 @@ chunk_size = 1000
 ################## Sec 2: Data Save Path ##################
 ###########################################################
 
-
-root_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/"
-folder_name = "np/all_crystal_grad_testruns/restricted_mu_vs_rho_mp_heatmaps/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t2_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
-path = "$(root_path)/$(folder_name)/"
+root_path = joinpath(project_root, "../../../simulations/raw_data")
+if length(t_ranges) < 3
+    folder_name = "np/abundance_data/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+else
+    folder_name = "np/abundance_data/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_t3($(t3_range[1])-$(t3_range[end])-$(length(t3_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+end
+datasave_path = "$(root_path)/$(folder_name)/"
 
 # Create the folder if it doesn't exist
-isdir(path) || mkpath(path)
-
+isdir(datasave_path) || mkpath(datasave_path)
+println("Data saved to: $(datasave_path)")
 
 
 ###########################################################
@@ -127,12 +128,12 @@ function get_user_options()
     return UserOptions(
         true,    # calc_mp
         false,   # calc_ipr
-        false,   # calc_mbs_energy_gap
+        true,   # calc_mbs_energy_gap
         false,   # calc_loc_len
         :np,     # calc_precision: :hp, :np
-        :maj_np, # save_evecs: :all_np, :all_hp, :maj_np, :maj_hp, :none
-        :maj_np, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
-        :restricted # solver_type: :generic, :mu_loop, :N_loop, :restricted
+        :none, # save_evecs: :all_np, :all_hp, :maj_np, :maj_hp, :none
+        :none, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
+        :generic # solver_type: :generic, :mu_loop, :N_loop, :restricted
     )
 end
 
@@ -151,18 +152,36 @@ xs = mu_range
 ys = rho_range
 grad1 = ParamCombGen.angle_to_gradient(35.0)
 grad2 = ParamCombGen.angle_to_gradient(45.0)
-cuts = GQC_D01_cuts # see auxilliary/param_restriction_cuts.jl for predefined cutting rules
+
+include(joinpath(project_root, "../../data_collection/auxilliary/param_restriction_cuts.jl"))
+# cuts = TMQC_D20_cuts # see auxilliary/param_restriction_cuts.jl for predefined cutting rules
+cuts = [
+    Dict(
+        :gradient => 0.0,
+        :y_intercept => -0.1,
+        :x_range => (2.75, maximum(xs)),
+        :y_range => (minimum(ys), maximum(ys)),
+        :cut_which_side => "above"
+    ),
+    # Dict(
+    #     :gradient => 0.0,
+    #     :y_intercept => -0.01,
+    #     :x_range => (minimum(xs), 1.0),
+    #     :y_range => (minimum(ys), maximum(ys)),
+    #     :cut_which_side => "above"
+    # )
+]
 
 mu_rho_restricted = ParamCombGen.restrict_range(xs, ys, cuts)
 
 
 # Function to check the output of cuts before proceeding with simulation
 function plot_mu_rho_restricted(mu_range, rho_range, mu_rho_restricted)
-    # Convert restricted tuples to a Set for fast lookup
+
     restricted_set = Set(mu_rho_restricted)
-    # Prepare grid of all (mu, rho) pairs
+
     all_points = [(mu, rho) for mu in mu_range, rho in rho_range]
-    # Separate restricted and unrestricted points
+
     restricted_x = Float64[]
     restricted_y = Float64[]
     unrestricted_x = Float64[]
@@ -176,15 +195,17 @@ function plot_mu_rho_restricted(mu_range, rho_range, mu_rho_restricted)
             push!(unrestricted_y, rho)
         end
     end
-    # Plot
-    scatter(unrestricted_x, unrestricted_y, color=:gray, label="Unrestricted", legend=:topright)
+
+    plt = scatter(unrestricted_x, unrestricted_y, color=:gray, label="Unrestricted", legend=:topright)
     scatter!(restricted_x, restricted_y, color=:red, label="Restricted")
     xlabel!("mu")
     ylabel!("rho")
     title!("mu-rho restricted points")
+
+    savefig(plt, "sample_cuts.png")
 end
 
-plot_mu_rho_restricted(mu_range, rho_range, mu_rho_restricted)
+# plot_mu_rho_restricted(mu_range, rho_range, mu_rho_restricted)
 
 
 ###########################################################
@@ -194,11 +215,11 @@ plot_mu_rho_restricted(mu_range, rho_range, mu_rho_restricted)
 # ------------------------------
 # --------- Single run ---------
 opts = get_user_options()
-run_selected_solver(opts, N_range, t_combinations, mu_range, Delta_range, sequences, sequence_name, path; precision=BigFloat_precision, chunk_size=chunk_size, param_restrictions=mu_rho_restricted)
+run_selected_solver(opts, N_range, t_combinations, mu_range, Delta_range, sequences, sequence_name, datasave_path; precision=BigFloat_precision, chunk_size=chunk_size, param_restrictions=mu_rho_restricted)
 
 
 # # ------------------------------------------------------------------------------
-# # --------- Repeated runs for all sequences (comment out Sec 2 to use) ---------
+# # --------- Repeated runs for all sequences (comment out Sec 2 to use) ---------
 # sequence_list = [normal_sequence, golden_sequence, silver_sequence, thue_morse_sequence, plastic_sequence]
 # sequence_name_list = ["NC", "GQC", "SQC", "TMQC", "PQC"]
 
@@ -208,14 +229,14 @@ run_selected_solver(opts, N_range, t_combinations, mu_range, Delta_range, sequen
 #     sequences = [sequence]
 
 #     # generate data save path
-#     root_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data"
-#     folder_name = "np/all_crystal_grad_testruns/mu_vs_rho_mp_heatmaps/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t2_range))__t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
-#     path = "$(root_path)/$(folder_name)/"
+#     root_path = joinpath(project_root, "../../../simulations/raw_data")
+#     folder_name = "np/abundance/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range)))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+#     datasave_path = "$(root_path)/$(folder_name)/"
 
 #     # Create the folder if it doesn't exist
-#     isdir(path) || mkpath(path)
+#     isdir(datasave_path) || mkpath(datasave_path)
 
 #     # run simulation
 #     opts = get_user_options()
-#     run_selected_solver(opts, N_range, t_combinations, mu_range, Delta_range, sequences, sequence_name, path; precision=BigFloat_precision, chunk_size=chunk_size)
+#     run_selected_solver(opts, N_range, t_combinations, mu_range, Delta_range, sequences, sequence_name, datasave_path; precision=BigFloat_precision, chunk_size=chunk_size, param_restrictions=nothing)
 # end

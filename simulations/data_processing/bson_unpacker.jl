@@ -116,8 +116,13 @@ function unpack_bason_standard(folder_path::String; mp_tol=1e-5)
     return df
 end
 
-#  # Example Usage
-# folder_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/all_crystal_grad_testruns/mu_vs_rho_mp_heatmaps/PQC_N(50-50-1)_t1(1.0-1.0-101__t2(0.0-10.0-101)_mu(0.0-10.0-101)_Delta(0.0-2.0-21)"
+# # Example Usage
+# folder_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/hp/abundance_data/SQC_N(50-50-1)_t1(1.0-1.0-1_t2(0.0-10.0-101)_mu(0.0-10.0-101)_Delta(0.1-2.0-20)"
 # mp_tol = 0.1
 # df = unpack_bason_standard(folder_path; mp_tol=mp_tol)
+
+# println("First 5 eigenvalues and their types:")
+# for i in 1:min(5, nrow(df))
+#     println("eigenvalues[$i]: ", df.eigenvalues[i], " (type: ", typeof(df.eigenvalues[i]), ")")
+# end
 

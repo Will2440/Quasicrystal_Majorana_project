@@ -5,3 +5,5 @@
 *.bson
 *.gif
 *.log
+raw_data/
+results/

@@ -345,8 +345,6 @@ end
 
 function hp_mu_rho_restricted_solver(
     N::Int,
-    # t_n_range::Vector{Vector{Float64}},
-    # mu_range::Vector{Float64},
     unrestricted_points::Vector{Tuple{Float64, Float64}},
     Delta::Float64,
     sequence::Vector{Int},

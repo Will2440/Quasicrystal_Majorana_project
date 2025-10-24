@@ -1,7 +1,9 @@
 # Local Machine Simulations
 
+
 ## Overview
 This folder <simulations/data_collection/local_machine/> is designed for generating simulation data for the quasicrystal Kitaev chain model on a local machine. It has been written for Mac and not tested on other platforms. User-interaction can be limited to __init__.jl and main.jl to run pre-existing calculations. There is a UserOptions architecture within main.jl which is designed to allow the user to choose exactly what calculations are made, what data is saved and what existing solving function should be used for their task.
+
 
 ## Folder Contents
 This folder contains the following scripts
@@ -15,11 +17,18 @@ This folder contains the following scripts
   - This script contains all of the physics. Functions pertaining to the creation and diagonalisation of the Kitaev Hamiltonian, as well as the further calculations on the solved system are here.
   - Secondly, Sec 3 contains the different possible 'solving functions' which loop over parameters in different ways. These are optimised for different kinds of jobs. See the examples in the lead comments of this script for more details.
 
+
 ## Usage Notes
 
+If you are running this process in VSCode or in a persistent Julia REPL, then you must comment out the inclusions at the top of main.jl and follow these steps of use:
 1) Run __init__.jl (once per Julia REPL session)
 2) Copmplete all 3 sections of main.jl
 3) Run main.jl
+
+If you are running this process directly from commandline, then __init__.jl is not needed, you must comment in the inclusions at the top of main.jl and proceed with steps (2) and (3) of the above list.
+
+N.B. repeated running of the solver.jl script in the same Julia REPL will lead to conflict in the UserOptions::Struct. Follow the advice above to avoid this.
+
 
 ## Editing Notes
 

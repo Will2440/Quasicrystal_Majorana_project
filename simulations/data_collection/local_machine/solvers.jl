@@ -310,8 +310,8 @@ function hp_generic_solver(
         maj_gap = Float64[],
         ipr = Float64[],
         loc_len = Float64[],
-        eigenvalues = Union{Vector{Float64}, Missing}[],
-        eigenvectors = Union{Matrix{Float64}, Missing}[]
+        eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
+        eigenvectors = Union{Matrix{Float64}, Matrix{BigFloat}, Missing}[]
     ))
 
     # Thread-local chunk counters
@@ -333,8 +333,8 @@ function hp_generic_solver(
                 maj_gap = Float64[],
                 ipr = Float64[],
                 loc_len = Float64[],
-                eigenvalues = Union{Vector{Float64}, Missing}[],
-                eigenvectors = Union{Matrix{Float64}, Missing}[]
+                eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
+                eigenvectors = Union{Vector{Float64}, Vector{BigFloat}, Missing}[]
             )
             thread_local_chunks[thread_id] = 1
         end
@@ -764,6 +764,8 @@ function hp_mu_rho_restricted_solver(
 
     """
 
+    println("Starting hp_mu_rho_restricted_solver...")
+
     # Thread-local data store
     thread_local_results = Dict(Threads.threadid() => DataFrame(
         N = Int[],
@@ -775,8 +777,8 @@ function hp_mu_rho_restricted_solver(
         maj_gap = Float64[],
         ipr = Float64[],
         loc_len = Float64[],
-        eigenvalues = Union{Vector{Float64}, Missing}[],
-        eigenvectors = Union{Matrix{Float64}, Missing}[]
+        eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
+        eigenvectors = Union{Vector{Float64}, Vector{BigFloat}, Missing}[]
     ))
 
     # Thread-local chunk counters
@@ -798,8 +800,8 @@ function hp_mu_rho_restricted_solver(
                 maj_gap = Float64[],
                 ipr = Float64[],
                 loc_len = Float64[],
-                eigenvalues = Union{Vector{Float64}, Missing}[],
-                eigenvectors = Union{Matrix{Float64}, Missing}[]
+                eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
+                eigenvectors = Union{Vector{Float64}, Vector{BigFloat}, Missing}[]
             )
             thread_local_chunks[thread_id] = 1
         end
@@ -824,14 +826,16 @@ function hp_mu_rho_restricted_solver(
         if is_unrestricted
             # Perform computations to solve Hamiltonian
             truncated_sequence = Vector(sequence[1:N])
-            BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
+            BdG = hp_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence, precision)
             evals, evecs = GenericLinearAlgebra.eigen(Hermitian(BdG))
 
+            # println(typeof(evals), " ", typeof(evecs))
+
             # Calculation options
-            mp = opts.calc_mp ? np_calc_maj_mp(evecs) : NaN
-            gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
-            ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
-            loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+            mp = opts.calc_mp ? hp_calc_maj_mp(evecs) : NaN
+            gap = opts.calc_mbs_energy_gap ? hp_mbs_gap_size(evals) : NaN
+            ipr = opts.calc_ipr ? hp_calc_maj_ipr(evecs) : NaN
+            loc_len = opts.calc_loc_len ? hp_calc_maj_loc_len(evecs) : NaN
 
 
             # Eigenvalue saving options (symbol-based)
