@@ -3,20 +3,24 @@
     created:     25/09/2025
     last edited: 25/10/2025
 
-    overview:
-        The main script to execute simulations on a local machine. Define parameter ranges and decide on calculation and datasaving requirements to call on the correct functions.
+    # file name:   main.jl
+    # created:     25/09/2025
+    # last edited: 30/09/2025
+
+    # overview:
+    #     The main script to execute simulations on a local machine. Define parameter ranges and decide on calculation and datasaving requirements to call on the correct functions.
     
-    structure:
-        - Sec 1:  Parameter Choice
-                    Generate all sequence types and define parameter ranges for N, t_n, mu and Delta
-        - Sec 2:  Data Save Path  
-                    Ddefine data save filepath
-        - Sec 3:  Tailoring
-                    Answer list of options relating to exactly what values should be calculated and saved, in what precision and using which solver type.
-        - Sec 4:  Cut Parameters
-                    (Optional) Define cutting rules to restrict parameter space for :restricted solver type
-        - Sec 5:  Run
-                    Call on the dispatch function to run the selected solver with all of the above parameters and options
+    # structure:
+    #     - Sec 1:  Parameter Choice
+    #                 Generate all sequence types and define parameter ranges for N, t_n, mu and Delta
+    #     - Sec 2:  Data Save Path  
+    #                 Ddefine data save filepath
+    #     - Sec 3:  Tailoring
+    #                 Answer list of options relating to exactly what values should be calculated and saved, in what precision and using which solver type.
+    #     - Sec 4:  Cut Parameters
+    #                 (Optional) Define cutting rules to restrict parameter space for :restricted solver type
+    #     - Sec 5:  Run
+    #                 Call on the dispatch function to run the selected solver with all of the above parameters and options
     
     usage instructions:
         1) 
