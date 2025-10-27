@@ -1,7 +1,7 @@
 """
     file name:   main.jl
     created:     25/09/2025
-    last edited: 01/10/2025
+    last edited: 25/10/2025
 
     overview:
         The main script to execute simulations on a local machine. Define parameter ranges and decide on calculation and datasaving requirements to call on the correct functions.
@@ -27,6 +27,9 @@
         4) Complete Sec 3 to choose what calculations to perform, in what precision and using which solver type (for more details on solver types see the lead comments in solvers.jl)
         (5) (Optional) Complete Sec 4 to define cutting rules to restrict parameter space for :restricted solver type for less expensive 2D param space solving.)
         6) Run this script with the code in Sec 5 to execute the simulations and save the data
+    
+    Latest edits:
+        - Added sequence_id tracking and saving throughout the simulation pipeline to allow identification of different sequence chunks in the output data. (This is needed for Sturmian sequence sweeps.)
 """
 
 project_root = @__DIR__
@@ -44,6 +47,7 @@ using .ParamCombGen
 using .LocalSolv: UserOptions
 using BSON: @save, @load
 using Plots
+using BSON
 
 
 ###########################################################
@@ -58,25 +62,27 @@ silver_sequence = SeqGen.silver_SeqGen(N_seq_seed)
 thue_morse_sequence = SeqGen.thue_morse_SeqGen(N_seq_seed)
 plastic_sequence = SeqGen.plastic_SeqGen(N_seq_seed)
 
+## Recover Sturmian sequences from .bson
+slope_file = "sturmian_slopes_K12_L6_balanced_bins500_mpb1_N500.bson"
+indir = joinpath(project_root, "..", "auxilliary", "sturm_seq_sets", slope_file)
+indir = normpath(indir)
+sturm_df = SeqGen.load_sturmian_seq_bson(indir)
 
 ## N Range (even single value must be a Vector type)
-N_range = [50]
-
+N_range = [100]
 
 ## t_n Range (combine any number of different hopping ranges)
 t1_range = collect(range(1.0, 1.0, 1))
-t2_range = collect(range(0.0, 10.0, 101))
+t2_range = collect(range(1.5, 1.5, 1))
 t3_range = [0.001, 0.01, 0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0, 100.0] #[2.0, 3.0, 4.0]
-t_ranges = [t1_range, t2_range, t3_range]
+t_ranges = [t1_range, t2_range]#, t3_range]
 t_combinations = ParamCombGen.t_ranges_combs(t_ranges)
 
-
 ## mu Range (even single calue must be a Vector type)
-mu_range = collect(range(0.0, 10.0, length=101))
-
+mu_range = collect(range(0.0, 3.0, length=301))
 
 ## Delta Range (even single value must be a vector type)
-Delta_range = collect(range(0.1, 2.0, 20))
+Delta_range = [0.05] #collect(range(0.1, 2.0, 20))
 
 
 ## Sequence Chunking (use this to generate sequence samples which can be compared)
@@ -89,8 +95,14 @@ Delta_range = collect(range(0.1, 2.0, 20))
 
 
 ## Sequence Definition (choose which standard hopping sequence to use)
-sequences = [plastic_sequence]
-sequence_name = "PQC"
+# sequences = [plastic_sequence]
+# sequence_name = "PQC"
+
+raw_seqs = collect(sturm_df.seq)
+sequences = [Vector{Int}(s) for s in raw_seqs]
+sequence_name = "Sturmian_K12_L6_balanced_bins500_mpb1"
+raw_seq_ids = collect(sturm_df.phi)
+sequence_ids = [Float64(id) for id in raw_seq_ids]
 
 
 ## Set Precision for hp calculations
@@ -106,17 +118,20 @@ chunk_size = 1000
 ################## Sec 2: Data Save Path ##################
 ###########################################################
 
+project_name = "sturmian_sweep"
+
 root_path = joinpath(project_root, "../../../simulations/raw_data")
 if length(t_ranges) < 3
-    folder_name = "np/abundance_data/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+    folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
 else
-    folder_name = "np/abundance_data/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_t3($(t3_range[1])-$(t3_range[end])-$(length(t3_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+    folder_name = "np/$project_name/abundance_data/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_t3($(t3_range[1])-$(t3_range[end])-$(length(t3_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
 end
 datasave_path = "$(root_path)/$(folder_name)/"
 
 # Create the folder if it doesn't exist
+datasave_path = normpath(datasave_path)
 isdir(datasave_path) || mkpath(datasave_path)
-println("Data saved to: $(datasave_path)")
+println("Data will be saved to: $(datasave_path)")
 
 
 ###########################################################
@@ -128,11 +143,11 @@ function get_user_options()
     return UserOptions(
         true,    # calc_mp
         false,   # calc_ipr
-        true,   # calc_mbs_energy_gap
+        false,   # calc_mbs_energy_gap
         false,   # calc_loc_len
         :np,     # calc_precision: :hp, :np
         :none, # save_evecs: :all_np, :all_hp, :maj_np, :maj_hp, :none
-        :none, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
+        :all_np, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
         :generic # solver_type: :generic, :mu_loop, :N_loop, :restricted
     )
 end
@@ -215,7 +230,7 @@ end
 # ------------------------------
 # --------- Single run ---------
 opts = get_user_options()
-run_selected_solver(opts, N_range, t_combinations, mu_range, Delta_range, sequences, sequence_name, datasave_path; precision=BigFloat_precision, chunk_size=chunk_size, param_restrictions=mu_rho_restricted)
+run_selected_solver(opts, N_range, t_combinations, mu_range, Delta_range, sequences, sequence_name, datasave_path; precision=BigFloat_precision, chunk_size=chunk_size, param_restrictions=mu_rho_restricted, sequence_ids=sequence_ids)
 
 
 # # ------------------------------------------------------------------------------

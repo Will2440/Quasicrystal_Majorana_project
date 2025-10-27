@@ -1,7 +1,7 @@
 """
     file name:   solver.jl
     created:     24/09/2025
-    last edited: 30/09/2025
+    last edited: 25/10/2025
 
     overview:
         This file generates an importable module containing all of the calculations relevant to the analysing Majoranas in the Kitaev chain.
@@ -31,6 +31,9 @@
                         - :N_loop_threaded
                             This solver type is similar to :N_loop but leverages Julia's multithreading capabilities to parallelise the inner loop.
                             (N.B. this was originally designed for HPC where multiple nodes of multiple cores could be accessed, so a balance between speed of each job in the batch and overall number of jobs could be found.)
+            
+    Latest edits:
+        - Added sequence_id tracking and saving in :generic functions ONLY for identification of different sequence chunks in the output data. (This is needed for Sturmian sequence sweeps.)
 """
 
 module LocalSolv
@@ -438,6 +441,7 @@ function np_generic_solver(
     Delta_range::Vector{Float64},
     sequences::Vector{Vector{Int}},
     sequence_name::String,
+    sequence_ids::Vector{Float64},
     chunk_size::Int,
     filepath::String,
     opts::UserOptions
@@ -459,6 +463,7 @@ function np_generic_solver(
         mu = Float64[],
         Delta = Float64[],
         sequence_name = String[],
+        sequence_id = Float64[],
         mp = Float64[],
         maj_gap = Float64[],
         ipr = Float64[],
@@ -482,6 +487,7 @@ function np_generic_solver(
                 mu = Float64[],
                 Delta = Float64[],
                 sequence_name = String[],
+                sequence_id = Float64[],
                 mp = Float64[],
                 maj_gap = Float64[],
                 ipr = Float64[],
@@ -501,6 +507,7 @@ function np_generic_solver(
         mu = mu_range[idx[3]]
         Delta = Delta_range[idx[4]]
         sequence = sequences[idx[5]]
+        sequence_id = sequence_ids[idx[5]]
 
         # Perform computations to solve Hamiltonian
         truncated_sequence = Vector(sequence[1:N])
@@ -545,6 +552,7 @@ function np_generic_solver(
             mu = mu,
             Delta = Delta,
             sequence_name = sequence_name,
+            sequence_id = sequence_id,
             mp = mp,
             maj_gap = gap,
             ipr = ipr,
@@ -583,6 +591,7 @@ function np_mu_rho_restricted_solver(
     Delta_range::Vector{Float64},
     sequences::Vector{Vector{Int}},
     sequence_name::String,
+    sequence_ids::Vector{Float64},
     chunk_size::Int,
     filepath::String,
     opts::UserOptions
@@ -604,6 +613,7 @@ function np_mu_rho_restricted_solver(
         mu = Float64[],
         Delta = Float64[],
         sequence_name = String[],
+        sequence_id = Float64[],
         mp = Float64[],
         maj_gap = Float64[],
         ipr = Float64[],
@@ -627,6 +637,7 @@ function np_mu_rho_restricted_solver(
                 mu = Float64[],
                 Delta = Float64[],
                 sequence_name = String[],
+                sequence_id = Float64[],
                 mp = Float64[],
                 maj_gap = Float64[],
                 ipr = Float64[],
@@ -646,6 +657,7 @@ function np_mu_rho_restricted_solver(
         mu = mu_range[idx[3]]
         Delta = Delta_range[idx[4]]
         sequence = sequences[idx[5]]
+        sequence_id = sequence_ids[idx[5]]
 
         # mu = mu_rho_point[1]
         # t_n = [1.0, mu_rho_point[2]]  # Based on t1=1.0 always!
@@ -698,6 +710,7 @@ function np_mu_rho_restricted_solver(
                 mu = mu,
                 Delta = Delta,
                 sequence_name = sequence_name,
+                sequence_id = sequence_id,
                 mp = mp,
                 maj_gap = gap,
                 ipr = ipr,
@@ -713,6 +726,7 @@ function np_mu_rho_restricted_solver(
                 mu = mu,
                 Delta = Delta,
                 sequence_name = sequence_name,
+                sequence_id = sequence_id,
                 mp = NaN,
                 maj_gap = NaN,
                 ipr = NaN,

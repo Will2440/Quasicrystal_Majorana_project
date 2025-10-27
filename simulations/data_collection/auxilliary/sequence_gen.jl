@@ -1,6 +1,12 @@
 module SeqGen
 
-export normal_SeqGen, golden_SeqGen, silver_SeqGen, thue_morse_SeqGen, cut_to_length, golden_LengthCalc, silver_LengthCalc, thue_morse_LengthCalc, plastic_LengthCalc
+using ProgressMeter
+using Random
+using DataFrames
+using BSON
+
+
+export normal_SeqGen, golden_SeqGen, silver_SeqGen, thue_morse_SeqGen, cut_to_length, golden_LengthCalc, silver_LengthCalc, thue_morse_LengthCalc, plastic_LengthCalc, rebalance_slopes, sample_sturmian_slopes, load_sturmian_seq_bson
 
 function normal_SeqGen(N::Int)
     return fill(1, N)
@@ -184,7 +190,6 @@ end
 
 
 
-
 # # # Example usage
 
 # # # Create pairing parameter sequence for N sites
@@ -216,5 +221,210 @@ end
 # plastic_sequence = cut_to_length(plastic_sequence, sequence_length)
 
 # println("finished")
+
+
+
+
+
+#############################################
+##### Sturmian Slope Sequence Generation #####
+#############################################
+
+# Continued-fraction slope evaluator
+function cf_prefix_to_slope(prefix::Vector{Int}; tail_repeats::Int=30)
+    @assert tail_repeats >= 1
+    x = 1.0
+    # approximate infinite tail of ones
+    for _ in 2:tail_repeats
+        x = 1.0 + 1.0 / x
+    end
+    # fold the prefix elements from back to front
+    for a in reverse(prefix)
+        x = float(a) + 1.0 / x
+    end
+    return 1.0 / x
+end
+
+# # Streaming enumeration of prefixes up to length L, digits 1:K
+# function enumerate_prefixes_stream(K::Int, L::Int)
+#     total = sum(K^k for k in 1:L)
+#     println("Stage 1/2: Enumerating prefixes (total ≈ $total)")
+#     prefixes = Channel{Vector{Int}}(Inf) do ch
+#         function build_prefix(prefix::Vector{Int}, depth::Int)
+#             if depth > L
+#                 return
+#             end
+#             for a in 1:K
+#                 newprefix = [prefix; a]
+#                 put!(ch, newprefix)
+#                 build_prefix(newprefix, depth + 1)
+#             end
+#         end
+#         build_prefix(Int[], 1)
+#     end
+#     return prefixes
+# end
+
+# # Main function: sample dense set of Sturmian slopes
+# function sample_sturmian_slopes(K::Int, L::Int; tail_repeats::Int=30)
+#     prefixes_ch = enumerate_prefixes_stream(K, L)
+
+#     # collect channel into a Vector so it is indexable/has length for threading
+#     prefixes = collect(prefixes_ch)
+
+#     n = length(prefixes)
+#     println("Stage 2/2: Computing slopes for $n prefixes...")
+
+#     slopes = Vector{Float64}(undef, n)
+#     pref_out = Vector{Vector{Int}}(undef, n)
+
+#     Threads.@threads for i in 1:n
+#         p = prefixes[i]
+#         s = cf_prefix_to_slope(p; tail_repeats=tail_repeats)
+#         slopes[i] = s
+#         pref_out[i] = p
+#     end
+
+#     # sort by slope and return DataFrame in same format as original
+#     order = sortperm(slopes)
+#     return DataFrame(prefix = pref_out[order],
+#                      slope  = slopes[order])
+# end
+
+
+# Streaming enumeration of prefixes up to length L, digits 1:K
+function enumerate_prefixes_stream(K::Int, L::Int; measure::Bool=false)
+    t0 = time_ns()
+    total = sum(K^k for k in 1:L)
+    println("Stage 1/2: Enumerating prefixes (total ≈ $total)")
+    prefixes = Channel{Vector{Int}}(Inf) do ch
+        function build_prefix(prefix::Vector{Int}, depth::Int)
+            if depth > L
+                return
+            end
+            Threads.@threads for a in 1:K
+                newprefix = [prefix; a]
+                put!(ch, newprefix)
+                build_prefix(newprefix, depth + 1)
+            end
+        end
+        build_prefix(Int[], 1)
+    end
+    if measure
+        println("enumerate_prefixes_stream elapsed = $( (time_ns() - t0)/1e9 ) s")
+    end
+    return prefixes
+end
+
+# Main function: sample dense set of Sturmian slopes
+function sample_sturmian_slopes(K::Int, L::Int; tail_repeats::Int=30, measure::Bool=false)
+    t0 = time_ns()
+    prefixes_ch = enumerate_prefixes_stream(K, L; measure=true)  # no measure here to avoid double printing
+
+    # collect channel into a Vector so it is indexable/has length for threading
+    prefixes = collect(prefixes_ch)
+
+    n = length(prefixes)
+    println("Stage 2/2: Computing slopes for $n prefixes...")
+
+    slopes = Vector{Float64}(undef, n)
+    pref_out = Vector{Vector{Int}}(undef, n)
+
+    Threads.@threads for i in 1:n
+        p = prefixes[i]
+        s = cf_prefix_to_slope(p; tail_repeats=tail_repeats)
+        slopes[i] = s
+        pref_out[i] = p
+    end
+
+    # sort by slope and return DataFrame in same format as original
+    order = sortperm(slopes)
+    out = DataFrame(prefix = pref_out[order],
+                    slope  = slopes[order])
+    if measure
+        println("sample_sturmian_slopes elapsed = $( (time_ns() - t0)/1e9 ) s")
+    end
+    return out
+end
+
+# Downsample slopes to rebalance distribution across [0,1]
+function rebalance_slopes(slopes_df::DataFrame; bins::Int=200, max_per_bin::Int=5, rng::AbstractRNG=Random.GLOBAL_RNG)
+    """
+    Downsample a (possibly uneven) collection of Sturmian slopes to produce a more
+    evenly distributed set across [0,1].
+
+    Input:
+      - slopes_df: DataFrame with columns :prefix (Vector{Int}) and :slope (Float64),
+                   exactly the same format produced by `sample_sturmian_slopes`.
+      - bins: number of equal-width bins across [0,1] used for stratification.
+      - max_per_bin: maximum number of samples to keep from any single bin.
+      - rng: optional RNG for reproducible random downsampling.
+
+    Output:
+      - DataFrame(prefix, slope) with a subset of rows of `slopes_df`, sorted by :slope,
+        and with the same column names / types as `sample_sturmian_slopes`.
+    """
+    # @assert (:prefix in names(slopes_df)) && (:slope in names(slopes_df)) "Expect columns :prefix and :slope"
+
+    # clamp slopes into [0,1] for robust binning
+    slopes = clamp.(Float64.(slopes_df.slope), 0.0, 1.0)
+
+    # bin edges and assignments
+    edges = collect(range(0.0, stop=1.0, length=bins+1))
+    bin_idx = [min(searchsortedlast(edges, s), bins) for s in slopes]  # 1..bins
+
+    # collect row indices per bin
+    groups = Dict{Int, Vector{Int}}()
+    for (i, b) in enumerate(bin_idx)
+        push!(get!(groups, b, Int[]), i)
+    end
+
+    # stratified downsample: keep at most max_per_bin items per bin
+    selected = Int[]
+    for idxs in values(groups)
+        if length(idxs) <= max_per_bin
+            append!(selected, idxs)
+        else
+            # random shuffle then take first max_per_bin (no extra dependencies)
+            perm = sort(idxs, by = _ -> rand(rng))
+            append!(selected, perm[1:max_per_bin])
+        end
+    end
+
+    if isempty(selected)
+        return DataFrame(prefix = Vector{Vector{Int}}(), slope = Float64[])
+    end
+
+    # build output DataFrame in the same format as sample_sturmian_slopes (prefix, slope)
+    out = slopes_df[selected, [:prefix, :slope]]
+    sort!(out, :slope)
+    return out
+end
+
+function load_sturmian_seq_bson(path::AbstractString)
+    @assert isfile(path) "BSON file not found: $path"
+    raw = BSON.load(path)
+
+    # try symbol or string keys
+    phis = haskey(raw, :phis) ? raw[:phis] : (haskey(raw, "phis") ? raw["phis"] : nothing)
+    seqs = haskey(raw, :seqs) ? raw[:seqs] : (haskey(raw, "seqs") ? raw["seqs"] : nothing)
+
+    phis === nothing && error("Key 'phis' not found in BSON file: $path. Keys: $(collect(keys(raw)))")
+    seqs === nothing && error("Key 'seqs' not found in BSON file: $path. Keys: $(collect(keys(raw)))")
+
+    @assert length(phis) == length(seqs) "Length mismatch: phis has $(length(phis)) but seqs has $(length(seqs))"
+
+    # build DataFrame with canonical column names
+    return DataFrame(phi = deepcopy(phis), seq = deepcopy(seqs))
+end
+
+
+# # # Example Usage
+# K = 3
+# L = 8
+# sturmian_slopes_df = sample_sturmian_slopes(K, L; tail_repeats=30)
+# balanced_sturm_df = rebalance_slopes(sturmian_slopes_df; bins=200, max_per_bin=5, rng=MersenneTwister(42))
+
+
 
 end # end module

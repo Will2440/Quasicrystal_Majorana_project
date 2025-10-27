@@ -1,0 +1,3 @@
+- sturmian_slopes_K12_L6_balanced_bins1000_mpb10.bson has 6804 and good distribution
+- sturmian_slopes_K12_L7_balanced_bins1000_mpb10.bson has 7110
+- sturmian_slopes_K12_L6_balanced_bins500_mpb1.bson has 368
