@@ -34,6 +34,8 @@
             
     Latest edits:
         - Added sequence_id tracking and saving in :generic functions ONLY for identification of different sequence chunks in the output data. (This is needed for Sturmian sequence sweeps.)
+        - Changed sequence_id to match Tuple{Float64, Float64} format used in sequences defined by phi and phason angle -- NB only for np_generic_solver!
+        
 """
 
 module LocalSolv
@@ -441,7 +443,7 @@ function np_generic_solver(
     Delta_range::Vector{Float64},
     sequences::Vector{Vector{Int}},
     sequence_name::String,
-    sequence_ids::Vector{Float64},
+    sequence_ids::Vector{Tuple{Float64,Float64}},
     chunk_size::Int,
     filepath::String,
     opts::UserOptions
@@ -463,7 +465,7 @@ function np_generic_solver(
         mu = Float64[],
         Delta = Float64[],
         sequence_name = String[],
-        sequence_id = Float64[],
+        sequence_id = Tuple{Float64,Float64}[],
         mp = Float64[],
         maj_gap = Float64[],
         ipr = Float64[],
@@ -487,7 +489,7 @@ function np_generic_solver(
                 mu = Float64[],
                 Delta = Float64[],
                 sequence_name = String[],
-                sequence_id = Float64[],
+                sequence_id = Tuple{Float64,Float64}[],
                 mp = Float64[],
                 maj_gap = Float64[],
                 ipr = Float64[],
