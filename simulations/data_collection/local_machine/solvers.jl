@@ -1,7 +1,7 @@
 """
     file name:   solver.jl
     created:     24/09/2025
-    last edited: 03/11/2025
+    last edited: 04/11/2025
 
     overview:
         This file generates an importable module containing all of the calculations relevant to the analysing Majoranas in the Kitaev chain.
@@ -35,6 +35,8 @@
     Latest edits:
         - Added sequence_id tracking and saving in :generic functions ONLY for identification of different sequence chunks in the output data. (This is needed for Sturmian sequence sweeps.)
         - Changed sequence_id to match Tuple{Float64, Float64} format used in sequences defined by phi and phason angle -- NB only for np_generic_solver!
+        - Added new function np_seq_scaled_solver to dynamically vary t_n based on the sequence
+        - Changed data allocation to more thread-safe version in np_generic_solver ONLY
 
 """
 
@@ -474,6 +476,24 @@ function np_generic_solver(
         eigenvectors = Union{Matrix{Float64}, Missing}[]
     ))
 
+    nthreads = Threads.nthreads()
+
+    # Preallocate per-thread DataFrames and chunk counters (index by thread id: 1..nthreads)
+    thread_local_results = [DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        sequence_id = Tuple{Float64,Float64}[],
+        mp = Float64[],
+        maj_gap = Float64[],
+        ipr = Float64[],
+        loc_len = Float64[],
+        eigenvalues = Union{Vector{Float64}, Missing}[],
+        eigenvectors = Union{Matrix{Float64}, Missing}[]
+    ) for _ in 1:nthreads]
+
     # Thread-local chunk counters
     thread_local_chunks = Dict(Threads.threadid() => 1)
 
@@ -481,24 +501,24 @@ function np_generic_solver(
     @showprogress Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
         thread_id = Threads.threadid()
 
-        # Initialize thread-local storage for this thread (if not already initialized)
-        if !haskey(thread_local_results, thread_id)
-            thread_local_results[thread_id] = DataFrame(
-                N = Int[],
-                t_n = Vector{Float64}[],
-                mu = Float64[],
-                Delta = Float64[],
-                sequence_name = String[],
-                sequence_id = Tuple{Float64,Float64}[],
-                mp = Float64[],
-                maj_gap = Float64[],
-                ipr = Float64[],
-                loc_len = Float64[],
-                eigenvalues = Union{Vector{Float64}, Missing}[],
-                eigenvectors = Union{Matrix{Float64}, Missing}[]
-            )
-            thread_local_chunks[thread_id] = 1
-        end
+        # # Initialize thread-local storage for this thread (if not already initialized)
+        # if !haskey(thread_local_results, thread_id)
+        #     thread_local_results[thread_id] = DataFrame(
+        #         N = Int[],
+        #         t_n = Vector{Float64}[],
+        #         mu = Float64[],
+        #         Delta = Float64[],
+        #         sequence_name = String[],
+        #         sequence_id = Tuple{Float64,Float64}[],
+        #         mp = Float64[],
+        #         maj_gap = Float64[],
+        #         ipr = Float64[],
+        #         loc_len = Float64[],
+        #         eigenvalues = Union{Vector{Float64}, Missing}[],
+        #         eigenvectors = Union{Matrix{Float64}, Missing}[]
+        #     )
+        #     thread_local_chunks[thread_id] = 1
+        # end
 
         results_df = thread_local_results[thread_id]
         chunk_idx = thread_local_chunks[thread_id]
