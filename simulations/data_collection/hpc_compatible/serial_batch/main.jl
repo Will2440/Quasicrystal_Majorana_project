@@ -189,20 +189,59 @@ end
 ################## Sec 5: Data Save Path ##################
 ###########################################################
 
+# project_name = "sturmian_sweep_t1-t2_swap"
+
+# root_path = joinpath(project_root, "../../../simulations/raw_data")
+# if length(t_ranges) < 3
+#     folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+# else
+#     folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_t3($(t3_range[1])-$(t3_range[end])-$(length(t3_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+# end
+# datasave_path = "$(root_path)/$(folder_name)/"
+
+# # Create the folder if it doesn't exist
+# datasave_path = normpath(datasave_path)
+# isdir(datasave_path) || mkpath(datasave_path)
+# println("Data will be saved to: $(datasave_path)")
+
+float3(x) = replace(@sprintf("%.6g", x), "." => "p")
+
+function range_info(vec)
+    isempty(vec) && return "none"
+    if eltype(vec) <: Integer
+        return "$(vec[1])-$(vec[end])-$(length(vec))"
+    else
+        return string(float3(vec[1]), "-", float3(vec[end]), "-", length(vec))
+    end
+end
+
+# Decide precision label from options
+opts = get_user_options()
+precision_label = opts.calc_precision == :hp ? "hp" :
+                  opts.calc_precision == :np ? "np" : "arpack"
+
 project_name = "sturmian_sweep_t1-t2_swap"
 
-root_path = joinpath(project_root, "../../../simulations/raw_data")
-if length(t_ranges) < 3
-    folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
-else
-    folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_t3($(t3_range[1])-$(t3_range[end])-$(length(t3_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
-end
-datasave_path = "$(root_path)/$(folder_name)/"
+# Save under serial_batch/results/
+root_path = joinpath(project_root, "results", precision_label, project_name)
 
-# Create the folder if it doesn't exist
-datasave_path = normpath(datasave_path)
+n_info   = range_info(N_range)
+t1_info  = range_info(t1_range)
+t2_info  = range_info(t2_range)
+t3_info  = range_info(t3_range)
+mu_info  = range_info(mu_range)
+d_info   = range_info(Delta_range)
+
+if isempty(t3_range)
+    folder_name = "$(sequence_name)_N($n_info)_t1($t1_info)_t2($t2_info)_mu($mu_info)_Delta($d_info)"
+else
+    folder_name = "$(sequence_name)_N($n_info)_t1($t1_info)_t2($t2_info)_t3($t3_info)_mu($mu_info)_Delta($d_info)"
+end
+
+datasave_path = normpath(joinpath(root_path, folder_name))
 isdir(datasave_path) || mkpath(datasave_path)
 println("Data will be saved to: $(datasave_path)")
+
 
 
 

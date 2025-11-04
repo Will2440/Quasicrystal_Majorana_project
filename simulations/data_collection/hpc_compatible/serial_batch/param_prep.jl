@@ -131,6 +131,8 @@ println("Loading sequences from: $indir")
 sturm_df = load_sturmian_seq_bson(indir)
 println("Loaded $(nrow(sturm_df)) sequences")
 
+literal(x) = repr(x)
+
 open(outdir, "w") do io
     # Header
     header = join((
