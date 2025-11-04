@@ -41,7 +41,7 @@
 """
 
 module LocalSolv
-export hp_generic_solver, np_generic_solver, np_mu_rho_restricted_solver, UserOptions
+export hp_generic_solver, np_generic_solver, np_mu_rho_restricted_solver, np_seq_scaled_solver, UserOptions
 
 using GenericLinearAlgebra
 using LinearAlgebra
@@ -450,35 +450,8 @@ function np_generic_solver(
     filepath::String,
     opts::UserOptions
 )
-    """
-        Notes:
-            - np_generic_solver iterates over all possible parameter ranges idnescriminately, hence 'generic'.
-            - The use of thread IDs to distribute tasks and data storage shoul donly be used on local machines where such ID-ing is known
-            - This can be used when the optimal loop method is not known or not needed.
-        CAUTION: 
-            - This ProgressMeter @showprogress may not give accurate representation of time remaining if disordered parameter looping results in variation in loop time over runtime.
-            - The chunk_size must be sufficiently small to not exceed the memory allocated to this task (again paying attention to idnescriminate loop orders).
-    """
-
-    # Thread-local data store
-    thread_local_results = Dict(Threads.threadid() => DataFrame(
-        N = Int[],
-        t_n = Vector{Float64}[],
-        mu = Float64[],
-        Delta = Float64[],
-        sequence_name = String[],
-        sequence_id = Tuple{Float64,Float64}[],
-        mp = Float64[],
-        maj_gap = Float64[],
-        ipr = Float64[],
-        loc_len = Float64[],
-        eigenvalues = Union{Vector{Float64}, Missing}[],
-        eigenvectors = Union{Matrix{Float64}, Missing}[]
-    ))
-
-    nthreads = Threads.nthreads()
-
-    # Preallocate per-thread DataFrames and chunk counters (index by thread id: 1..nthreads)
+    # allocate by maxthreadid (not nthreads) to cover all possible thread ids
+    maxid = Threads.maxthreadid()
     thread_local_results = [DataFrame(
         N = Int[],
         t_n = Vector{Float64}[],
@@ -492,36 +465,13 @@ function np_generic_solver(
         loc_len = Float64[],
         eigenvalues = Union{Vector{Float64}, Missing}[],
         eigenvectors = Union{Matrix{Float64}, Missing}[]
-    ) for _ in 1:nthreads]
+    ) for _ in 1:maxid]
+    thread_local_chunks = ones(Int, maxid)
 
-    # Thread-local chunk counters
-    thread_local_chunks = Dict(Threads.threadid() => 1)
-
-    # Iterate over parameter combinations in parallel
-    @showprogress Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
-        thread_id = Threads.threadid()
-
-        # # Initialize thread-local storage for this thread (if not already initialized)
-        # if !haskey(thread_local_results, thread_id)
-        #     thread_local_results[thread_id] = DataFrame(
-        #         N = Int[],
-        #         t_n = Vector{Float64}[],
-        #         mu = Float64[],
-        #         Delta = Float64[],
-        #         sequence_name = String[],
-        #         sequence_id = Tuple{Float64,Float64}[],
-        #         mp = Float64[],
-        #         maj_gap = Float64[],
-        #         ipr = Float64[],
-        #         loc_len = Float64[],
-        #         eigenvalues = Union{Vector{Float64}, Missing}[],
-        #         eigenvectors = Union{Matrix{Float64}, Missing}[]
-        #     )
-        #     thread_local_chunks[thread_id] = 1
-        # end
-
-        results_df = thread_local_results[thread_id]
-        chunk_idx = thread_local_chunks[thread_id]
+    @showprogress Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
+        tid = Threads.threadid()
+        results_df = thread_local_results[tid]
+        chunk_idx = thread_local_chunks[tid]
 
         # Extract parameters
         N = N_range[idx[1]]
@@ -531,19 +481,16 @@ function np_generic_solver(
         sequence = sequences[idx[5]]
         sequence_id = sequence_ids[idx[5]]
 
-        # Perform computations to solve Hamiltonian
+        # Solve
         truncated_sequence = Vector(sequence[1:N])
         BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
         evals, evecs = LinearAlgebra.eigen(Hermitian(BdG))
 
-        # Calculation options
         mp = opts.calc_mp ? np_calc_maj_mp(evecs) : NaN
         gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
         ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
         loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
 
-
-        # Eigenvalue saving options (symbol-based)
         eigenvalues_to_save = begin
             if opts.save_evals == :all_np
                 evals
@@ -554,8 +501,6 @@ function np_generic_solver(
                 missing
             end
         end
-
-        # Eigenvector saving options (symbol-based)
         eigenvectors_to_save = begin
             if opts.save_evecs == :all_np
                 evecs
@@ -567,7 +512,6 @@ function np_generic_solver(
             end
         end
 
-        # Append results to the thread's local DataFrame
         push!(results_df, (
             N = N,
             t_n = t_n,
@@ -583,21 +527,20 @@ function np_generic_solver(
             eigenvectors = eigenvectors_to_save
         ))
 
-        # Save chunk if the DataFrame reaches the chunk size
         if nrow(results_df) >= chunk_size
-            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).bson"
             @save file_name results_df
             empty!(results_df)
-            thread_local_chunks[thread_id] += 1
+            thread_local_chunks[tid] = chunk_idx + 1
         end
     end
 
-    # Save any remaining rows in each thread's DataFrame
-    for thread_id in keys(thread_local_results)
-        results_df = thread_local_results[thread_id]
+    # Flush remaining per-thread results
+    for tid in 1:maxid
+        results_df = thread_local_results[tid]
         if nrow(results_df) > 0
-            chunk_idx = thread_local_chunks[thread_id]
-            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            chunk_idx = thread_local_chunks[tid]
+            file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).bson"
             @save file_name results_df
         end
     end

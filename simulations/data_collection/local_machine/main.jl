@@ -73,7 +73,7 @@ indir = normpath(indir)
 sturm_df = SeqGen.load_sturmian_seq_bson(indir)
 
 ## N Range (even single value must be a Vector type)
-N_range = [500]
+N_range = [100]
 
 ## t_n Range (combine any number of different hopping ranges)
 t1_range = collect(range(1.0, 1.0, 1))
@@ -86,7 +86,7 @@ t_combinations = ParamCombGen.t_ranges_combs(t_ranges)
 mu_range = [0.0]#, 1.0, 2.0, 3.0] #collect(range(0.0, 3.0, length=151))
 
 ## Delta Range (even single value must be a vector type)
-Delta_range = [0.0, 0.5, 1.0] #collect(range(0.1, 2.0, 20))
+Delta_range = [0.0]#, 0.5, 1.0] #collect(range(0.1, 2.0, 20))
 
 
 ## Sequence Chunking (use this to generate sequence samples which can be compared)

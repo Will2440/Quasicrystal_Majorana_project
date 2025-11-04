@@ -8,11 +8,24 @@ using Plots
 using DataFrames
 
 ## Sturmian slope sampling
-K = 12
-L = 6
-tail_repeats = 30
+K = 8
+L = 3
+tail_repeats = 50
 sturmian_slopes_df = SeqGen.sample_sturmian_slopes(K, L; tail_repeats=tail_repeats, measure=true)
-println("Sampled $(length(sturmian_slopes_df.slope)) Sturmian slopes with K=$K and L=$L.")
+println("Sampled $(length(sturmian_slopes_df.slope)) Sturmian slopes with K=$K, L=$L and tail_repeats=$tail_repeats.")
+
+## Add symmetric slopes (1 - phi)
+comp = false
+if comp == true
+    slopes = collect(sturmian_slopes_df[!, :slope])
+    symmetric_slopes = 1 .- slopes
+    sturmian_slopes_df = vcat(
+        sturmian_slopes_df,
+        DataFrame(slope = symmetric_slopes);
+        cols = :union
+    )
+    println("Appended $(length(symmetric_slopes)) complementary slopes; total slopes = $(nrow(sturmian_slopes_df))")
+end
 
 bins = 500
 max_per_bin = 1
@@ -86,23 +99,30 @@ function plt_sturmian_slope_sampling_bins(
     key_text = join(parts, "\n")
     Plots.annotate!(plt, (0.98, 0.98, Plots.text(key_text, :right, 9)))
 
-    # Plots.savefig(plt, savepath)
-    Plots.display(plt)
+    Plots.savefig(plt, savepath)
+    # Plots.display(plt)
     # return plt
 end
 
+outdir = joinpath(@__DIR__, "sturm_grad_sets")
+
+plt_sturmian_slope_sampling_bins(
+    sturmian_slopes_df,
+    joinpath(outdir, "sturmian_slope_sampling_bins_K$(K)_L$(L)_r$(tail_repeats)_comp-$(comp).png");
+    K=K,
+    L=L
+)
+
 plt_sturmian_slope_sampling_bins(
     balanced_sturm_df,
-    "bal_sturmian_slope_sampling_bins_K$(K)_L$(L).png";
+    joinpath(outdir, "balanced_sturmian_slope_sampling_bins_K$(K)_L$(L)_r$(tail_repeats)_comp-$(comp).png");
     K=K,
     L=L
 )
 
 
 ## save to BSON file
-filepath = joinpath(@__DIR__, "sturm_grad_sets")
-
-@save joinpath(filepath, "sturmian_slopes_K$(K)_L$(L)_balanced_bins$(bins)_mpb$(max_per_bin).bson") balanced_sturm_df
-println("Saved balanced Sturmian slopes to $(joinpath(filepath, "sturmian_slopes_K$(K)_L$(L)_balanced.bson"))")
-# @save joinpath(filepath, "sturmian_slopes_K$(K)_L$(L).bson") sturmian_slopes_df
-# println("Saved raw Sturmian slopes to $(joinpath(filepath, "sturmian_slopes_K$(K)_L$(L).bson"))")
+@save joinpath(outdir, "sturmian_slopes_K$(K)_L$(L)_balanced_bins$(bins)_mpb$(max_per_bin)_r$(tail_repeats)_comp-$(comp).bson") balanced_sturm_df
+println("Saved balanced Sturmian slopes to $(joinpath(outdir, "sturmian_slopes_K$(K)_L$(L)_balanced.bson"))")
+@save joinpath(outdir, "sturmian_slopes_K$(K)_L$(L)_r$(tail_repeats)_comp-$(comp).bson") sturmian_slopes_df
+println("Saved raw Sturmian slopes to $(joinpath(outdir, "sturmian_slopes_K$(K)_L$(L).bson"))")

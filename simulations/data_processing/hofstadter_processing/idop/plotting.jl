@@ -1,4 +1,5 @@
 using Plots
+using DataFrames
 
 function plt_discrete_phase_projections(
     df::DataFrame,

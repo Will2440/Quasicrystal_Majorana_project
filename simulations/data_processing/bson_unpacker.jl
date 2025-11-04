@@ -54,7 +54,7 @@ function process_bson_files(folder_path::String)
         mu = Float64[],
         Delta = Float64[],
         sequence_name = String[],
-        sequence_id = Float64[],
+        sequence_id = Any[],
         mp = Float64[],
         maj_gap = Float64[],
         ipr = Float64[],
@@ -374,10 +374,10 @@ end
 #     println("eigenvalues[$i]: ", df.eigenvalues[i], " (type: ", typeof(df.eigenvalues[i]), ")")
 # end
 
-data_folder = "Sturmian_K12_L6_balanced_bins500_mpb1_N(100-100-1)_t1(1.0-1.0-1_t2(1.5-1.5-1)_mu(0.0-3.0-151)_Delta(0.05-0.05-1)"
-folder_path_hof = normpath(joinpath(@__DIR__, "..", "..", "simulations", "raw_data", "np", "sturmian_sweep", data_folder))
-println("Unpacking Hofstadter data from folder: ", folder_path_hof)
+# data_folder = "Sturmian_K12_L6_balanced_bins500_mpb1_N(100-100-1)_t1(1.0-1.0-1_t2(1.5-1.5-1)_mu(0.0-3.0-151)_Delta(0.05-0.05-1)"
+# folder_path_hof = normpath(joinpath(@__DIR__, "..", "..", "simulations", "raw_data", "np", "sturmian_sweep", data_folder))
+# println("Unpacking Hofstadter data from folder: ", folder_path_hof)
 
-df = unpack_bson_hofstadter(folder_path_hof)
+# df = unpack_bson_hofstadter(folder_path_hof)
 
 

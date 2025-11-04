@@ -2,12 +2,20 @@ include("plotting.jl")
 include("processing.jl")
 include("../../bson_unpacker.jl")
 
-data_folder = "Sturmian_K12_L6_balanced_bins500_mpb1_N(100-100-1)_t1(1.0-1.0-1_t2(1.5-1.5-1)_mu(0.0-3.0-301)_Delta(0.05-0.05-1)"
-folder_path_hof = normpath(joinpath(@__DIR__, "..", "..", "..", "raw_data", "np", "sturmian_sweep", data_folder))
+
+data_folder = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N1000_phason_0.0-1-0.0_N(500-500-1)_t1(1.0-1.0-1_t2(1.5-1.5-1)_mu(0.0-0.0-1)_Delta(0.0-1.0-3)"
+run_set_name = "sturmian_sweep_t1-t2_swap"
+folder_path_hof = normpath(joinpath(@__DIR__, "..", "..", "..", "raw_data", "np", run_set_name, data_folder))
 println("Unpacking Hofstadter data from folder: ", folder_path_hof)
 
-df = unpack_bson_hofstadter(folder_path_hof; mp_targ=-1.0, mp_tol=1e-1, eval_targ=0.0, eval_tol=1e-2)
-rename!(df, :sequence_id => :phi)
+
+mp_tol = 5e-2
+df = unpack_bson_hofstadter(folder_path_hof; mp_targ=-1.0, mp_tol=mp_tol, eval_targ=0.0, eval_tol=1e-2)
+# rename!(df, :sequence_id => :phi)
+# println("DataFrame keynames after renaming: $(names(df))")
+sequence_ids = collect(df.sequence_id)
+df[!, :phi] = getindex.(df.sequence_id, 1)
+df[!, :phason] = getindex.(df.sequence_id, 2)
 println("DataFrame keynames after renaming: $(names(df))")
 
 N_range = sort(unique(df.N))
@@ -29,42 +37,53 @@ outdir = normpath(joinpath(@__DIR__, "..", "..", "..", "results", "sturmian_swee
 isdir(outdir) || mkpath(outdir)
 println("Saving results to folder: ", outdir)
 
+plt_tn_range = t_n_range
+plt_mu_range = mu_range #[1.0, 2.0, 3.0]
+plt_Delta_range = Delta_range
+plt_phason_range = phason_range #[0.0]
 
-plt_discrete_phase_projections(
-    df,
-    :mu,
-    :phi,
-    :disc_mp,
-    joinpath(outdir, "sturmian_sweep_disc_mp_mu_phi.png");
-    # N = N,
-    # Delta = Delta,
-    # t_n = [t_n]
-)
-
-df_mp_idop = prep_df_for_IDOP(df; N=N, Delta=Delta, t_n=t_n)
-df_mp_idop = compute_idop_df!(df_mp_idop; disc_variable=:disc_mp)
-
-# ## Compute and check just a few phi values
-# test_idx = 1:20:length(df_mp_idop.phi)
-# for i in test_idx
-#     phi = df_mp_idop.phi[i]
-
-#     plateaus_mp = find_idop_plateaus_from_idop(
-#         df_mp_idop;
-#         delta_idop_thresh = 1e-4,
-#         min_mu_span = 0.0,
-#         min_samples = 1,
-#         phi = phi
-#     )
-#     plt_idop_plateaus_check(
-#         df_mp_idop, plateaus_mp, joinpath(outdir, "idop_plateaus_test/idop_plateaus_mp_phi$(phi).png");
-#         N = N, Delta = 0.05, t_n = [1.0, 1.5], phi = phi
-#     )
+# for t_n in plt_tn_range
+for phason in plt_phason_range
+    for Delta in plt_Delta_range
+        plt_discrete_phase_projections(
+            df,
+            :mu,
+            :phi,
+            :disc_mp,
+            joinpath(outdir, "sturmian_sweep_disc_mp_mu_phi_mptol$(mp_tol)_Delta$(Delta)_tn$(t_n)_phason$(phason).png");
+            N = N,
+            Delta = Delta,
+            phason = phason,
+            t_n = [t_n]
+        )
+    end
+end
 # end
 
-df_mp_idop = compute_idop_plateaus_all!(df_mp_idop; delta_idop_thresh=1e-3, min_mu_span=0.0, min_samples=5)
+# df_mp_idop = prep_df_for_IDOP(df; N=N, Delta=Delta, t_n=t_n)
+# df_mp_idop = compute_idop_df!(df_mp_idop; disc_variable=:disc_mp)
 
-plt_plateaus_vs_phi_idop(
-    df_mp_idop,
-    joinpath(outdir, "sturmian_sweep_idop_plateaus_vs_phi_N$(N)_Delta$(Delta)_t_n$(t_n).png")
-)
+# # ## Compute and check just a few phi values
+# # test_idx = 1:20:length(df_mp_idop.phi)
+# # for i in test_idx
+# #     phi = df_mp_idop.phi[i]
+
+# #     plateaus_mp = find_idop_plateaus_from_idop(
+# #         df_mp_idop;
+# #         delta_idop_thresh = 1e-4,
+# #         min_mu_span = 0.0,
+# #         min_samples = 1,
+# #         phi = phi
+# #     )
+# #     plt_idop_plateaus_check(
+# #         df_mp_idop, plateaus_mp, joinpath(outdir, "idop_plateaus_test/idop_plateaus_mp_phi$(phi).png");
+# #         N = N, Delta = 0.05, t_n = [1.0, 1.5], phi = phi
+# #     )
+# # end
+
+# df_mp_idop = compute_idop_plateaus_all!(df_mp_idop; delta_idop_thresh=1e-5, min_mu_span=0.0, min_samples=5)
+
+# plt_plateaus_vs_phi_idop(
+#     df_mp_idop,
+#     joinpath(outdir, "sturmian_sweep_idop_plateaus_vs_phi_N$(N)_Delta$(Delta)_t_n$(t_n)_mptol$(mp_tol).png")
+# )

@@ -408,14 +408,16 @@ function load_sturmian_seq_bson(path::AbstractString)
     # try symbol or string keys
     phis = haskey(raw, :phis) ? raw[:phis] : (haskey(raw, "phis") ? raw["phis"] : nothing)
     seqs = haskey(raw, :seqs) ? raw[:seqs] : (haskey(raw, "seqs") ? raw["seqs"] : nothing)
+    phasons = haskey(raw, :phasons) ? raw[:phasons] : (haskey(raw, "phasons") ? raw["phasons"] : nothing)
 
     phis === nothing && error("Key 'phis' not found in BSON file: $path. Keys: $(collect(keys(raw)))")
     seqs === nothing && error("Key 'seqs' not found in BSON file: $path. Keys: $(collect(keys(raw)))")
+    phasons === nothing && error("Key 'phasons' not found in BSON file: $path. Keys: $(collect(keys(raw)))")
 
-    @assert length(phis) == length(seqs) "Length mismatch: phis has $(length(phis)) but seqs has $(length(seqs))"
+    # @assert length(phis) == length(seqs) "Length mismatch: phis has $(length(phis)) but seqs has $(length(seqs))"
 
     # build DataFrame with canonical column names
-    return DataFrame(phi = deepcopy(phis), seq = deepcopy(seqs))
+    return DataFrame(phi = deepcopy(phis), seq = deepcopy(seqs), phason = deepcopy(phasons))
 end
 
 

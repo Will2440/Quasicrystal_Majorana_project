@@ -1,4 +1,5 @@
 using Statistics
+using DataFrames
 
 function prep_df_for_IDOP(df::DataFrame; fixed_values...)
     """
