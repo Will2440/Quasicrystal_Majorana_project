@@ -1,9 +1,9 @@
-# plots_masters_thesis/
-# final_data_masters_thesis/
-*.json
-*.png
-*.bson
-*.gif
-*.log
+plots_masters_thesis/
+final_data_masters_thesis/
+# *.json
+# *.png
+# *.bson
+# *.gif
+# *.log
 raw_data/
 results/
