@@ -15,7 +15,23 @@
 using .LocalSolv
 
 
-function run_selected_solver(opts::UserOptions, N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, filepath; precision=512, chunk_size=1000, param_restrictions=nothing, sequence_ids=nothing)
+function run_selected_solver(
+	opts::UserOptions, 
+	N_range, 
+	t_n_range, 
+	mu_range, 
+	Delta_range, 
+	sequences, 
+	sequence_name, 
+	filepath; 
+	precision=512, 
+	chunk_size=1000, 
+	param_restrictions=nothing, 
+	sequence_ids=nothing, 
+	rho_target=1.5, 
+	tbar=1.5, 
+	preserve_symbol=:t1
+)
 
 	if opts.solver_type == :generic
 		if opts.calc_precision == :np
@@ -62,6 +78,12 @@ function run_selected_solver(opts::UserOptions, N_range, t_n_range, mu_range, De
                 error("mu_rho_restricted parameter must be provided for :hp_restricted solver.")
             end
             LocalSolv.hp_mu_rho_restricted_solver(N_range, t_n_range, mu_range, param_restrictions, Delta_range, sequences, sequence_name, precision, chunk_size, filepath, opts)
+        end
+	elseif opts.solver_type == :seq_scaled
+        if opts.calc_precision == :np
+            LocalSolv.np_seq_scaled_solver(N_range, rho_target, tbar, mu_range, Delta_range, sequences, sequence_name, sequence_ids, chunk_size, filepath, opts; preserve=preserve_symbol)
+        else
+            error("Unsupported precision mode: $(opts.calc_precision). Chose opts.calc_precision = :np")
         end
     else
         error("Unknown solver type: $(opts.solver_type)")

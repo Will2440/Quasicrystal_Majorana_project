@@ -1,7 +1,7 @@
 """
     file name:   solver.jl
     created:     24/09/2025
-    last edited: 25/10/2025
+    last edited: 03/11/2025
 
     overview:
         This file generates an importable module containing all of the calculations relevant to the analysing Majoranas in the Kitaev chain.
@@ -35,7 +35,7 @@
     Latest edits:
         - Added sequence_id tracking and saving in :generic functions ONLY for identification of different sequence chunks in the output data. (This is needed for Sturmian sequence sweeps.)
         - Changed sequence_id to match Tuple{Float64, Float64} format used in sequences defined by phi and phason angle -- NB only for np_generic_solver!
-        
+
 """
 
 module LocalSolv
@@ -582,6 +582,156 @@ function np_generic_solver(
         end
     end
 
+    return nothing
+end
+
+function np_seq_scaled_solver(
+    N_range::Vector{Int},
+    rho::Float64,                  # desired t2/t1 ratio
+    tbar::Float64,                 # target average hopping per bond
+    mu_range::Vector{Float64},
+    Delta_range::Vector{Float64},
+    sequences::Vector{Vector{Int}},
+    sequence_name::String,
+    sequence_ids::Vector{Tuple{Float64,Float64}},
+    chunk_size::Int,
+    filepath::String,
+    opts::UserOptions;
+    preserve::Symbol = :rho        # :rho => scale both t1,t2; :t1 => keep t1=1.0 adjust t2
+)
+    # Thread-local data store
+    thread_local_results = Dict(Threads.threadid() => DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        sequence_id = Tuple{Float64,Float64}[],
+        mp = Float64[],
+        maj_gap = Float64[],
+        ipr = Float64[],
+        loc_len = Float64[],
+        eigenvalues = Union{Vector{Float64}, Missing}[],
+        eigenvectors = Union{Matrix{Float64}, Missing}[]
+    ))
+    thread_local_chunks = Dict(Threads.threadid() => 1)
+
+    @showprogress Threads.@threads for idx in CartesianIndices((length(N_range), length(mu_range), length(Delta_range), length(sequences)))
+        thread_id = Threads.threadid()
+        if !haskey(thread_local_results, thread_id)
+            thread_local_results[thread_id] = DataFrame(
+                N = Int[],
+                t_n = Vector{Float64}[],
+                mu = Float64[],
+                Delta = Float64[],
+                sequence_name = String[],
+                sequence_id = Tuple{Float64,Float64}[],
+                mp = Float64[],
+                maj_gap = Float64[],
+                ipr = Float64[],
+                loc_len = Float64[],
+                eigenvalues = Union{Vector{Float64}, Missing}[],
+                eigenvectors = Union{Matrix{Float64}, Missing}[]
+            )
+            thread_local_chunks[thread_id] = 1
+        end
+        results_df = thread_local_results[thread_id]
+        chunk_idx = thread_local_chunks[thread_id]
+
+        # Parameters
+        N      = N_range[idx[1]]
+        mu     = mu_range[idx[2]]
+        Delta  = Delta_range[idx[3]]
+        seq    = sequences[idx[4]]
+        seq_id = sequence_ids[idx[4]]
+
+        # Truncate and count bond types over bonds 1:(N-1)
+        truncated_sequence = Vector(seq[1:N])
+        Lb = N - 1
+        n1 = count(==(1), @view truncated_sequence[1:Lb])
+        n2 = Lb - n1
+
+        # Derive t_n from counts
+        t1 = 0.0
+        t2 = 0.0
+        if preserve == :rho
+            # Keep ratio t2/t1 = rho; scale both so average hopping per bond equals tbar
+            # tbar = (n1*t1 + n2*t2)/Lb = s*(n1 + n2*rho)/Lb  =>  s = tbar*Lb/(n1 + n2*rho)
+            denom = n1 + n2*rho
+            s = denom == 0 ? 1.0 : tbar * Lb / denom
+            t1 = s
+            t2 = s * rho
+        elseif preserve == :t1
+            # Keep t1 = 1.0; adjust t2 to meet average tbar (rho will change)
+            # tbar = (n1*1 + n2*t2)/Lb  =>  t2 = (tbar*Lb - n1)/n2
+            t1 = 1.0
+            t2 = n2 == 0 ? 1.0 : (tbar * Lb - n1) / n2
+        else
+            error("Unknown preserve=:$(preserve). Use :rho or :t1")
+        end
+        t_n = [t1, t2]
+
+        # Solve
+        BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
+        evals, evecs = LinearAlgebra.eigen(Hermitian(BdG))
+
+        mp   = opts.calc_mp ? np_calc_maj_mp(evecs) : NaN
+        gap  = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
+        ipr  = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
+        llen = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+
+        eigenvalues_to_save = begin
+            if opts.save_evals == :all_np
+                evals
+            elseif opts.save_evals == :maj_np
+                mid = length(evals) ÷ 2
+                evals[mid:mid+1]
+            else
+                missing
+            end
+        end
+        eigenvectors_to_save = begin
+            if opts.save_evecs == :all_np
+                evecs
+            elseif opts.save_evecs == :maj_np
+                mid = size(evecs, 2) ÷ 2
+                evecs[:, mid:mid+1]
+            else
+                missing
+            end
+        end
+
+        push!(results_df, (
+            N = N,
+            t_n = t_n,
+            mu = mu,
+            Delta = Delta,
+            sequence_name = sequence_name,
+            sequence_id = seq_id,
+            mp = mp,
+            maj_gap = gap,
+            ipr = ipr,
+            loc_len = llen,
+            eigenvalues = eigenvalues_to_save,
+            eigenvectors = eigenvectors_to_save
+        ))
+
+        if nrow(results_df) >= chunk_size
+            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            @save file_name results_df
+            empty!(results_df)
+            thread_local_chunks[thread_id] += 1
+        end
+    end
+
+    for thread_id in keys(thread_local_results)
+        results_df = thread_local_results[thread_id]
+        if nrow(results_df) > 0
+            chunk_idx = thread_local_chunks[thread_id]
+            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            @save file_name results_df
+        end
+    end
     return nothing
 end
 

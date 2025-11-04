@@ -67,13 +67,13 @@ thue_morse_sequence = SeqGen.thue_morse_SeqGen(N_seq_seed)
 plastic_sequence = SeqGen.plastic_SeqGen(N_seq_seed)
 
 ## Recover Sturmian sequences from .bson
-slope_file = "sturmian_slopes_K12_L6_balanced_bins500_mpb1_N500.bson"
+slope_file = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N1000_phason_0.0-1-0.0.bson"
 indir = joinpath(project_root, "..", "auxilliary", "sturm_seq_sets", slope_file)
 indir = normpath(indir)
 sturm_df = SeqGen.load_sturmian_seq_bson(indir)
 
 ## N Range (even single value must be a Vector type)
-N_range = [100]
+N_range = [500]
 
 ## t_n Range (combine any number of different hopping ranges)
 t1_range = collect(range(1.0, 1.0, 1))
@@ -83,10 +83,10 @@ t_ranges = [t1_range, t2_range]#, t3_range]
 t_combinations = ParamCombGen.t_ranges_combs(t_ranges)
 
 ## mu Range (even single calue must be a Vector type)
-mu_range = collect(range(0.0, 3.0, length=301))
+mu_range = [0.0]#, 1.0, 2.0, 3.0] #collect(range(0.0, 3.0, length=151))
 
 ## Delta Range (even single value must be a vector type)
-Delta_range = [0.05] #collect(range(0.1, 2.0, 20))
+Delta_range = [0.0, 0.5, 1.0] #collect(range(0.1, 2.0, 20))
 
 
 ## Sequence Chunking (use this to generate sequence samples which can be compared)
@@ -104,9 +104,12 @@ Delta_range = [0.05] #collect(range(0.1, 2.0, 20))
 
 raw_seqs = collect(sturm_df.seq)
 sequences = [Vector{Int}(s) for s in raw_seqs]
-sequence_name = "Sturmian_K12_L6_balanced_bins500_mpb1"
-raw_seq_ids = collect(sturm_df.phi)
-sequence_ids = [Float64(id) for id in raw_seq_ids]
+sequence_name = String(slope_file[1:end-5])  # remove .bson
+# raw_seq_ids = collect(sturm_df.phi)
+# sequence_ids = [Float64(id) for id in raw_seq_ids]
+phis = collect(sturm_df.phi)
+phasons = collect(sturm_df.phason)
+sequence_ids = [(phi, phason) for (phi, phason) in zip(phis, phasons)]
 
 
 ## Set Precision for hp calculations
@@ -122,13 +125,13 @@ chunk_size = 1000
 ################## Sec 2: Data Save Path ##################
 ###########################################################
 
-project_name = "sturmian_sweep"
+project_name = "sturmian_sweep_t1-t2_swap"
 
 root_path = joinpath(project_root, "../../../simulations/raw_data")
 if length(t_ranges) < 3
     folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
 else
-    folder_name = "np/$project_name/abundance_data/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_t3($(t3_range[1])-$(t3_range[end])-$(length(t3_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+    folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_t3($(t3_range[1])-$(t3_range[end])-$(length(t3_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
 end
 datasave_path = "$(root_path)/$(folder_name)/"
 
@@ -152,7 +155,7 @@ function get_user_options()
         :np,     # calc_precision: :hp, :np
         :none, # save_evecs: :all_np, :all_hp, :maj_np, :maj_hp, :none
         :all_np, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
-        :generic # solver_type: :generic, :mu_loop, :N_loop, :restricted
+        :generic # solver_type: :generic, seq_scaled, :mu_loop, :N_loop, :restricted
     )
 end
 
@@ -194,7 +197,7 @@ cuts = [
 mu_rho_restricted = ParamCombGen.restrict_range(xs, ys, cuts)
 
 
-# Function to check the output of cuts before proceeding with simulation
+## Function to check the output of cuts before proceeding with simulation
 function plot_mu_rho_restricted(mu_range, rho_range, mu_rho_restricted)
 
     restricted_set = Set(mu_rho_restricted)
@@ -228,13 +231,40 @@ end
 
 
 ###########################################################
-####################### Sec 5: Run ########################
+################ Sec 5: Sequence Scaling ##################
+###########################################################
+
+## Allow either t_1 or rho to be preserved when scaling hopping for each sequences
+preserve_symbol = :rho  # options: :t1, :rho
+rho_target = 1.5    # target rho value when preserve_symbol = :rho
+tbar = 1.5         # target t_1 value when preserve_symbol = :t1
+
+
+
+###########################################################
+####################### Sec 6: Run ########################
 ###########################################################
 
 # ------------------------------
 # --------- Single run ---------
 opts = get_user_options()
-run_selected_solver(opts, N_range, t_combinations, mu_range, Delta_range, sequences, sequence_name, datasave_path; precision=BigFloat_precision, chunk_size=chunk_size, param_restrictions=mu_rho_restricted, sequence_ids=sequence_ids)
+run_selected_solver(
+    opts, 
+    N_range, 
+    t_combinations, 
+    mu_range, 
+    Delta_range, 
+    sequences, 
+    sequence_name, 
+    datasave_path; 
+    precision=BigFloat_precision, 
+    chunk_size=chunk_size, 
+    param_restrictions=mu_rho_restricted, 
+    sequence_ids=sequence_ids,
+    rho_target=rho_target,
+    tbar=tbar,
+    preserve_symbol=preserve_symbol
+)
 
 
 # # ------------------------------------------------------------------------------
