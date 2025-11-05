@@ -4,7 +4,7 @@ include("plotting.jl")
 include("processing.jl")
 include("../../bson_unpacker.jl")
 
-data_folder = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N1000_phason_0.0-1-0.0_N(500-500-1)_t1(1.0-1.0-1_t2(1.5-1.5-1)_mu(0.0-0.0-1)_Delta(0.0-1.0-3)"
+data_folder = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N1000_phason_0.0-1-0.0_N(100-100-1)_t1(1.0-1.0-1_t2(1.5-1.5-1)_mu(0.0-0.0-1)_Delta(0.0-0.0-1)"
 run_set_name = "sturmian_sweep_t1-t2_swap"
 folder_path_hof = normpath(joinpath(@__DIR__, "..", "..", "..", "raw_data", "np", run_set_name, data_folder))
 println("Unpacking Hofstadter data from folder: ", folder_path_hof)
@@ -117,7 +117,7 @@ df = compute_idos_df!(df)
 ################################################
 ## Gap-labelled plateau finding and plotting ###
 ################################################
-threshold = 0.01
+threshold = 0.1
 df = compute_plateaus_on_idos_df!(df; threshold=threshold)
 n = 5
 p_range = collect(-n:n)
@@ -169,22 +169,22 @@ for phason in plt_phason_range
     for Delta in plt_Delta_range
         for mu in plt_mu_range
 
-            plt_coloured_gaps_energy_vs_phi(
-                df,
-                joinpath(outdir, "gaps_energy_vs_phi_coloured_legend_mu$(mu)_Delta$(Delta)_phason$(phason)_thresh$(threshold)_prange$(p_range)_qmax$(q_max).png");
-                cmap=:viridis, #extreme_cmap, # :viridis
-                mu=mu,
-                Delta=Delta,
-                phason=phason,
-                atol=1e-8,
-                rtol=1e-6,
-                verbose=false
-            )
+            # plt_coloured_gaps_energy_vs_phi(
+            #     df,
+            #     joinpath(outdir, "gaps_energy_vs_phi_coloured_legend_mu$(mu)_Delta$(Delta)_phason$(phason)_thresh$(threshold)_prange$(p_range)_qmax$(q_max).png");
+            #     cmap=:viridis, #extreme_cmap, # :viridis
+            #     mu=mu,
+            #     Delta=Delta,
+            #     phason=phason,
+            #     atol=1e-8,
+            #     rtol=1e-6,
+            #     verbose=false
+            # )
 
             plt_qled_coloured_gaps_energy_vs_phi(
                 df,
-                joinpath(outdir, "qled_gaps_energy_vs_phi_coloured_legend_mu$(mu)_Delta$(Delta)_phason$(phason)_thresh$(threshold)_prange$(p_range)_qmax$(q_max).png");
-                cmap=:viridis, #extreme_cmap, # :viridis
+                joinpath(outdir, "abs_qled_gaps_energy_vs_phi_coloured_legend_mu$(mu)_Delta$(Delta)_phason$(phason)_thresh$(threshold)_prange$(p_range)_qmax$(q_max).png");
+                cmap=:RdBu, #extreme_cmap, # :viridis
                 mu=mu,
                 Delta=Delta,
                 phason=phason,

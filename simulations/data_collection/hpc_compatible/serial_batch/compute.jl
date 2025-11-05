@@ -1,7 +1,7 @@
 """
     file name:   hpc_compatible/serial_batch/compute.jl
     created:     04/11/2025
-    last edited: 04/11/2025
+    last edited: 05/11/2025
 
     overview:
         This file contains the dispatch function which calls on the appropriate solver function based on user input from main.jl.
@@ -16,20 +16,20 @@ using .HPCSolv
 
 function run_selected_solver(
     opts::UserOptions,
-    N_range,
-    t_n_range,
-    mu_range,
-    Delta_range,
-    sequences,
-    sequence_name,
-    filepath;
-    precision=512,
-    chunk_size=1000,
-    param_restrictions=nothing,
-    sequence_ids=nothing,
-    rho_target=1.5,
-    tbar=1.5,
-    preserve_symbol=:t1
+    N_range::Vector{Int},
+    t_n_range::Vector{Vector{Float64}},
+    mu_range::Vector{Float64},
+    Delta_range::Vector{Float64},
+    sequences::Vector{Vector{Int}},
+    sequence_name::String,
+    filepath::String;
+    precision::Int=512,
+    chunk_size::Int=1000,
+    param_restrictions::Union{Nothing, Vector{Tuple{Float64,Float64}}}=nothing,
+    sequence_ids::Union{Nothing, Vector{Tuple{Float64,Float64}}}=nothing,
+    rho_target::Float64=1.5,
+    tbar::Float64=1.5,
+    preserve_symbol::Symbol=:t1
 )
 
     # helper: pick the first element for mu_loop and warn if multiple

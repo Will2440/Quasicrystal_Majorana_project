@@ -700,6 +700,10 @@ function plt_qled_coloured_gaps_energy_vs_phi(
     q_list = sort(collect(keys(q_to_ps)))
     n_q = length(q_list)
 
+    # # q_list = abs.(q_list) 
+    # absq = abs.(q_list)
+    # base_colors = cgrad(cmap, n_q)[1 .+ floor.(Int, (absq .- minimum(absq))/(maximum(absq) - minimum(absq))*(n_q-1))]
+
     # Build base colours for q from cmap
     base_colors = nothing
     if isa(cmap, Symbol) || isa(cmap, String)

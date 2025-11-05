@@ -706,7 +706,7 @@ function np_mu_rho_restricted_solver(
     Delta_range::Vector{Float64},
     sequences::Vector{Vector{Int}},
     sequence_name::String,
-    sequence_ids::Vector{Float64},
+    sequence_ids::Vector{Tuple{Float64,Float64}},
     chunk_size::Int,
     filepath::String,
     opts::UserOptions
@@ -728,7 +728,7 @@ function np_mu_rho_restricted_solver(
         mu = Float64[],
         Delta = Float64[],
         sequence_name = String[],
-        sequence_id = Float64[],
+        sequence_id = Tuple{Float64,Float64}[],
         mp = Float64[],
         maj_gap = Float64[],
         ipr = Float64[],

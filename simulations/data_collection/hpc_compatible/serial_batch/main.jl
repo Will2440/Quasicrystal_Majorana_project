@@ -53,12 +53,14 @@ using BSON: @save, @load
 using BSON
 using DelimitedFiles
 
+row_index = parse(Int64, ARGS[1]);
+
 
 ###########################################################
 ################# Sec 1: Parameter Choice #################
 ###########################################################
 """
-    Read one parameter row from the new param_prep .dat file
+    Read one parameter row from the latest param_prep .dat file
     .dat columns (tab-separated):
     Ns::Vector{Int}
     mus::Vector{Float64}
@@ -66,9 +68,9 @@ using DelimitedFiles
     t1s::Vector{Float64}
     t2s::Vector{Float64}
     t3s::Vector{Float64}
-    sequence_name::String
-    sequence_id::Tuple{Float64,Float64}
-    sequence::Vector{Int}
+    sequence_names::Vector{String}
+    sequence_ids::Vector{Tuple{Float64,Float64}}
+    sequences::Vector{Vector{Int}}
 """
 function read_parameters(params_path::String, row_index::Int)
     raw = DelimitedFiles.readdlm(params_path, '\t', String; header=true)
@@ -77,27 +79,26 @@ function read_parameters(params_path::String, row_index::Int)
     # parse Julia literals safely (vectors/tuples)
     parse_lit(S::AbstractString) = Base.invokelatest(eval, Meta.parse(S))
 
-    Ns          = Vector{Int}(parse_lit(row[1]))
-    mus         = Vector{Float64}(parse_lit(row[2]))
-    Deltas      = Vector{Float64}(parse_lit(row[3]))
-    t1s         = Vector{Float64}(parse_lit(row[4]))
-    t2s         = Vector{Float64}(parse_lit(row[5]))
-    t3s         = Vector{Float64}(parse_lit(row[6]))
-    sequence_nm = row[7]
-    seq_id      = Tuple{Float64,Float64}(parse_lit(row[8]))
-    sequence    = Vector{Int}(parse_lit(row[9]))
+    Ns              = Vector{Int}(parse_lit(row[1]))
+    mus             = Vector{Float64}(parse_lit(row[2]))
+    Deltas          = Vector{Float64}(parse_lit(row[3]))
+    t1s             = Vector{Float64}(parse_lit(row[4]))
+    t2s             = Vector{Float64}(parse_lit(row[5]))
+    t3s             = Vector{Float64}(parse_lit(row[6]))
+    sequence_nms    = Vector{String}(parse_lit(row[7]))
+    seq_ids         = Vector{Tuple{Float64,Float64}}(parse_lit(row[8]))
+    seqs            = Vector{Vector{Int}}(parse_lit(row[9]))
 
     return (
         Ns = Ns, mus = mus, Deltas = Deltas,
         t1s = t1s, t2s = t2s, t3s = t3s,
-        sequence_name = sequence_nm, sequence_id = seq_id, sequence = sequence
+        sequence_names = sequence_nms, sequence_ids = seq_ids, sequences = seqs
     )
 end
 
 # Choose the .dat file and which row to run
-params_filename = "YOUR_PARAMS_FILE.dat"
+params_filename = "params_sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N1000_phason_0.0-1-0.0_Ns_500-500-1_mus_0-3-601_Deltas_0.0-0.2-5_t1_1-1-1_t2_1p5-2p5-3_t3_none_nseq_1.dat"
 params_dat_path = joinpath(project_root, "batch_params", "param_sets", params_filename)
-row_index = parse(Int64, ARGS[1]);
 
 p = read_parameters(params_dat_path, row_index)
 

@@ -1,6 +1,6 @@
 #!/bin/bash
   
-#SBATCH --job-name=TMQC_mu_loop
+#SBATCH --job-name=QC-PT
 #SBATCH --nodes=1
 #SBATCH --partition=cpu
 #SBATCH --ntasks-per-node=1
@@ -11,4 +11,4 @@
 
 
 module add languages/julia
-julia /user/home/hb21877/Majorana_solver_for_BlueCrystal/serial_compute/serial_run_main_mu_loop_TMQC.jl $SLURM_ARRAY_TASK_ID
+julia /user/home/hb21877/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/serial_batch/main.jl $SLURM_ARRAY_TASK_ID
