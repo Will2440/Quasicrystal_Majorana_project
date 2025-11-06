@@ -97,18 +97,18 @@ sequence_name = splitext(sequence_bson_file)[1]
 
 # Build filename with range summaries
 ns_info     = isempty(Ns)      ? "none" : "$(Ns[1])-$(Ns[end])-$(length(Ns))"
-mus_info    = isempty(mus_all) ? "none" : string(replace(@sprintf("%.6g", mus_all[1]), "."=>"p"),
-                                                "-", replace(@sprintf("%.6g", mus_all[end]), "."=>"p"),
+mus_info    = isempty(mus_all) ? "none" : string(replace(string(mus_all[1]), "."=>"p"),
+                                                "-", replace(string(mus_all[end]), "."=>"p"),
                                                 "-", length(mus_all))
 deltas_info = isempty(Deltas)  ? "none" : "$(Deltas[1])-$(Deltas[end])-$(length(Deltas))"
-t1_info     = isempty(t1s)     ? "none" : string(replace(@sprintf("%.6g", t1s[1]), "."=>"p"),
-                                                "-", replace(@sprintf("%.6g", t1s[end]), "."=>"p"),
+t1_info     = isempty(t1s)     ? "none" : string(replace(string(t1s[1]), "."=>"p"),
+                                                "-", replace(string(t1s[end]), "."=>"p"),
                                                 "-", length(t1s))
-t2_info     = isempty(t2s)     ? "none" : string(replace(@sprintf("%.6g", t2s[1]), "."=>"p"),
-                                                "-", replace(@sprintf("%.6g", t2s[end]), "."=>"p"),
+t2_info     = isempty(t2s)     ? "none" : string(replace(string(t2s[1]), "."=>"p"),
+                                                "-", replace(string(t2s[end]), "."=>"p"),
                                                 "-", length(t2s))
-t3_info     = isempty(t3s)     ? "none" : string(replace(@sprintf("%.6g", t3s[1]), "."=>"p"),
-                                                "-", replace(@sprintf("%.6g", t3s[end]), "."=>"p"),
+t3_info     = isempty(t3s)     ? "none" : string(replace(string(t3s[1]), "."=>"p"),
+                                                "-", replace(string(t3s[end]), "."=>"p"),
                                                 "-", length(t3s))
 
 out_file = joinpath(outdir,
