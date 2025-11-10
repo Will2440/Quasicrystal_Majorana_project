@@ -6,7 +6,7 @@ using DataFrames
 using BSON
 
 
-export normal_SeqGen, golden_SeqGen, silver_SeqGen, thue_morse_SeqGen, cut_to_length, golden_LengthCalc, silver_LengthCalc, thue_morse_LengthCalc, plastic_LengthCalc, rebalance_slopes, sample_sturmian_slopes, load_sturmian_seq_bson
+export normal_SeqGen, golden_SeqGen, silver_SeqGen, thue_morse_SeqGen, cut_to_length, golden_LengthCalc, silver_LengthCalc, thue_morse_LengthCalc, plastic_LengthCalc, rebalance_slopes, sample_sturmian_slopes, load_sturmian_seq_bson, cf_prefix_to_slope_custom, sample_sturmian_slopes_custom
 
 function normal_SeqGen(N::Int)
     return fill(1, N)
@@ -245,53 +245,6 @@ function cf_prefix_to_slope(prefix::Vector{Int}; tail_repeats::Int=30)
     return 1.0 / x
 end
 
-# # Streaming enumeration of prefixes up to length L, digits 1:K
-# function enumerate_prefixes_stream(K::Int, L::Int)
-#     total = sum(K^k for k in 1:L)
-#     println("Stage 1/2: Enumerating prefixes (total ≈ $total)")
-#     prefixes = Channel{Vector{Int}}(Inf) do ch
-#         function build_prefix(prefix::Vector{Int}, depth::Int)
-#             if depth > L
-#                 return
-#             end
-#             for a in 1:K
-#                 newprefix = [prefix; a]
-#                 put!(ch, newprefix)
-#                 build_prefix(newprefix, depth + 1)
-#             end
-#         end
-#         build_prefix(Int[], 1)
-#     end
-#     return prefixes
-# end
-
-# # Main function: sample dense set of Sturmian slopes
-# function sample_sturmian_slopes(K::Int, L::Int; tail_repeats::Int=30)
-#     prefixes_ch = enumerate_prefixes_stream(K, L)
-
-#     # collect channel into a Vector so it is indexable/has length for threading
-#     prefixes = collect(prefixes_ch)
-
-#     n = length(prefixes)
-#     println("Stage 2/2: Computing slopes for $n prefixes...")
-
-#     slopes = Vector{Float64}(undef, n)
-#     pref_out = Vector{Vector{Int}}(undef, n)
-
-#     Threads.@threads for i in 1:n
-#         p = prefixes[i]
-#         s = cf_prefix_to_slope(p; tail_repeats=tail_repeats)
-#         slopes[i] = s
-#         pref_out[i] = p
-#     end
-
-#     # sort by slope and return DataFrame in same format as original
-#     order = sortperm(slopes)
-#     return DataFrame(prefix = pref_out[order],
-#                      slope  = slopes[order])
-# end
-
-
 # Streaming enumeration of prefixes up to length L, digits 1:K
 function enumerate_prefixes_stream(K::Int, L::Int; measure::Bool=false)
     t0 = time_ns()
@@ -428,5 +381,81 @@ end
 # balanced_sturm_df = rebalance_slopes(sturmian_slopes_df; bins=200, max_per_bin=5, rng=MersenneTwister(42))
 
 
+
+
+#############################################
+##### Generalised Sturmian Slope Sequence Generation #####
+#############################################
+
+# Modified continued-fraction slope evaluator with customizable tail
+function cf_prefix_to_slope_custom(prefix::Vector{Int}; tail_option::Union{Nothing, String, Int}=nothing, tail_length::Int=30, rng::AbstractRNG=MersenneTwister(42))
+    x = 1.0
+    
+    if tail_option === nothing
+        # No tail: approximate with infinite 1's (x starts at 1.0)
+        for a in reverse(prefix)
+            x = float(a) + 1.0 / x
+        end
+        return 1.0 / x
+    elseif tail_option == "all_ones"
+        tail = fill(1, tail_length)
+    elseif tail_option == "all_zeros"
+        error("Tail option 'all_zeros' not supported: continued fraction with zeros is invalid.")
+    elseif tail_option == "random"
+        tail = rand(rng, 1:maximum(prefix), tail_length)  # Random 1s and 2s for binary Sturmian
+    elseif isa(tail_option, Int)
+        if tail_option < 0
+            error("Tail option Int must be positive.")
+        end
+        tail = fill(tail_option, tail_length)
+    else
+        error("Invalid tail_option: $tail_option. Use nothing, 'all_ones', 'random', or a positive Int.")
+    end
+    
+    # Fold tail from innermost to outermost (end to start)
+    for i in tail_length:-1:1
+        a = tail[i]
+        x = float(a) + 1.0 / x
+    end
+    
+    # Fold prefix from innermost to outermost (end to start)
+    for a in reverse(prefix)
+        x = float(a) + 1.0 / x
+    end
+    
+    return 1.0 / x
+end
+
+# New function: sample Sturmian slopes with customizable tail options, outputting DataFrame like sample_sturmian_slopes
+function sample_sturmian_slopes_custom(K::Int, L::Int; tail_option::Union{Nothing, String, Int}=nothing, tail_length::Int=30, measure::Bool=false, rng::AbstractRNG=MersenneTwister(42))
+    t0 = time_ns()
+    prefixes_ch = enumerate_prefixes_stream(K, L; measure=false)  # Reuse existing enumeration
+    
+    # Collect channel into a Vector
+    prefixes = collect(prefixes_ch)
+    
+    n = length(prefixes)
+    if measure
+        println("Stage 2/2: Computing slopes for $n prefixes with custom tail...")
+    end
+    
+    slopes = Vector{Float64}(undef, n)
+    pref_out = Vector{Vector{Int}}(undef, n)
+    
+    Threads.@threads for i in 1:n
+        p = prefixes[i]
+        s = cf_prefix_to_slope_custom(p; tail_option=tail_option, tail_length=tail_length, rng=rng)
+        slopes[i] = s
+        pref_out[i] = p
+    end
+    
+    # Sort by slope and return DataFrame
+    order = sortperm(slopes)
+    out = DataFrame(prefix = pref_out[order], slope = slopes[order])
+    if measure
+        println("sample_sturmian_slopes_custom elapsed = $((time_ns() - t0)/1e9) s")
+    end
+    return out
+end
 
 end # end module
