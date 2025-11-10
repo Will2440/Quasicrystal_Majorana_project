@@ -1,5 +1,12 @@
 using Statistics
 using DataFrames
+using Polynomials
+
+
+
+############################################
+######## DataFrame Preparation #############
+############################################
 
 function prep_df_for_IDOP(df::DataFrame; fixed_values...)
     """
@@ -40,28 +47,246 @@ function prep_df_for_IDOP(df::DataFrame; fixed_values...)
     return DataFrame(rows)
 end
 
-
-# function compute_idop_df!(df::DataFrame; disc_variable::Symbol = :disc_mp)
+## original, based on indexing disc_mp to mu_values and stretching mu_values ot fit
+# function compute_phase_norm!(df::DataFrame; mu_col::Symbol=:mu_values, disc_col::Symbol=:disc_mp, mu_norm_col::Symbol=:mu_values_norm, disc_norm_col::Symbol=:mp_disc_norm)
 #     """
-#     Compute Integrated Density Of Phase-gaps (IDOP) from a discretised column.
-#     Assumes `disc_variable` is present in `df` and contains Vector{Int} for each row.
+#     For each row, normalize :mu_values so that the mu at the first disc_mp=1 maps to 0,
+#     and the mu at the last disc_mp=1 maps to 1. Add :mu_values_norm and :mp_disc_norm (unchanged disc_mp).
+#     Assumes df has :mu_values (Vector) and :disc_mp (Vector) per row.
 #     """
-#     if !(disc_variable in names(df) || string(disc_variable) in names(df))
-#         error("discretised column $(disc_variable) not found in DataFrame")
-#     end
-
-#     n = nrow(df)
-#     idop_col = Vector{Vector{Float64}}(undef, n)
-
+#     # if !(mu_col in names(df)) || !(disc_col in names(df))
+#     #     error("Required columns $mu_col and $disc_col not found in DataFrame")
+#     # end
+    
+#     mu_norm_vec = Vector{Vector{Float64}}(undef, nrow(df))
+#     disc_norm_vec = Vector{Vector{Int}}(undef, nrow(df))
+    
 #     for (i, row) in enumerate(eachrow(df))
-#         vec = row[disc_variable]            # expect AbstractVector{Int}
-#         v = Int.(vec)                       # coerce elementwise to Int
-#         idop_col[i] = cumsum(v) ./ length(v)
+#         mu_vals = row[mu_col]
+#         disc_vals = row[disc_col]
+        
+#         # Find indices where disc_mp == 1
+#         idxs = findall(x -> x == 1, disc_vals)
+#         if isempty(idxs)
+#             # No 1s, perhaps set norm to original or handle
+#             mu_norm_vec[i] = mu_vals  # or zeros, but let's assume there are
+#             disc_norm_vec[i] = disc_vals
+#             continue
+#         end
+        
+#         idx_first = first(idxs)
+#         idx_last = last(idxs)
+        
+#         mu_first = mu_vals[idx_first]
+#         mu_last = mu_vals[idx_last]
+        
+#         if mu_last == mu_first
+#             # Degenerate, set to 0.5 or something
+#             mu_norm_vec[i] = fill(0.5, length(mu_vals))
+#         else
+#             mu_norm_vec[i] = (mu_vals .- mu_first) ./ (mu_last - mu_first)
+#         end
+        
+#         disc_norm_vec[i] = disc_vals  # unchanged
 #     end
-
-#     df.idop = idop_col
+    
+#     df[!, mu_norm_col] = mu_norm_vec
+#     df[!, disc_norm_col] = disc_norm_vec
+    
 #     return df
 # end
+
+## revised version creating :mu_mp and :mu_mp_norm, a list of mu values where disc_mp == 1 (else missing), and normalized version
+function compute_phase_norm!(df::DataFrame; mu_col::Symbol=:mu_values, disc_col::Symbol=:disc_mp, mu_mp_col::Symbol=:mu_mp, mu_mp_norm_col::Symbol=:mu_mp_norm, disc_norm_col::Symbol=:mp_disc_norm)
+    """
+    For each row, create :mu_mp (mu values where disc_mp == 1, else missing) and :mu_mp_norm (normalized to [0,1] per row based on min/max of mu_mp).
+    Also keeps :mp_disc_norm as the original disc_mp vector.
+    Assumes df has :mu_values (Vector) and :disc_mp (Vector) per row.
+    """
+    # if !(mu_col in names(df)) || !(disc_col in names(df))
+    #     error("Required columns $mu_col and $disc_col not found in DataFrame")
+    # end
+    
+    mu_mp_vec = Vector{Vector{Union{Missing, Float64}}}(undef, nrow(df))
+    mu_mp_norm_vec = Vector{Vector{Union{Missing, Float64}}}(undef, nrow(df))
+    disc_norm_vec = Vector{Vector{Int}}(undef, nrow(df))
+    
+    for (i, row) in enumerate(eachrow(df))
+        mu_vals = row[mu_col]
+        disc_vals = row[disc_col]
+        
+        # Create mu_mp: mu where disc == 1, else missing
+        mu_mp = [disc_vals[j] == 1 ? mu_vals[j] : missing for j in 1:length(mu_vals)]
+        mu_mp_vec[i] = mu_mp
+        
+        # Normalize mu_mp to [0,1] based on its own min/max (non-missing values)
+        non_missing_mu = filter(!ismissing, mu_mp)
+        if !isempty(non_missing_mu)
+            min_mu = minimum(non_missing_mu)
+            max_mu = maximum(non_missing_mu)
+            if max_mu > min_mu
+                mu_mp_norm = [ismissing(m) ? missing : (m - min_mu) / (max_mu - min_mu) for m in mu_mp]
+            else
+                # Degenerate case: all mu_mp the same, set to 0.5
+                mu_mp_norm = [ismissing(m) ? missing : 0.5 for m in mu_mp]
+            end
+        else
+            # No matches: keep as missing
+            mu_mp_norm = mu_mp
+        end
+        mu_mp_norm_vec[i] = mu_mp_norm
+        
+        # Keep original disc_mp
+        disc_norm_vec[i] = disc_vals
+    end
+    
+    df[!, mu_mp_col] = mu_mp_vec
+    df[!, mu_mp_norm_col] = mu_mp_norm_vec
+    df[!, disc_norm_col] = disc_norm_vec
+    
+    return df
+end
+
+## revised version normalising based on a line of best fit to the endge of mp_disc==1
+function fit_final_mp_line(df::DataFrame; mu_col=:mu_values, disc_col=:disc_mp, phi_col=:phi, ignore_n_largest_phi::Int=0)
+    phi_vals = Float64[]
+    mu_final_mp = Float64[]
+    for row in eachrow(df)
+        mu_vec = row[mu_col]
+        disc_vec = row[disc_col]
+        idxs = findall(x -> x == 1, disc_vec)
+        if !isempty(idxs)
+            push!(phi_vals, row[phi_col])
+            push!(mu_final_mp, mu_vec[last(idxs)])
+        end
+    end
+    # Ignore the largest n phi values if requested
+    if ignore_n_largest_phi > 0 && length(phi_vals) > ignore_n_largest_phi
+        inds = sortperm(phi_vals)
+        keep_inds = inds[1:end-ignore_n_largest_phi]
+        phi_vals = phi_vals[keep_inds]
+        mu_final_mp = mu_final_mp[keep_inds]
+    end
+    # Linear regression: μ = a*φ + b
+    X = hcat(ones(length(phi_vals)), phi_vals)
+    coeffs = X \ mu_final_mp
+    b, a = coeffs[1], coeffs[2]
+    return (a=a, b=b, phi_vals=phi_vals, mu_final_mp=mu_final_mp)
+end
+
+function compute_phase_norm_with_line!(
+    df::DataFrame;
+    mu_col::Symbol=:mu_values,
+    disc_col::Symbol=:disc_mp,
+    phi_col::Symbol=:phi,
+    mu_mp_col::Symbol=:mu_mp,
+    mu_mp_norm_col::Symbol=:mu_mp_norm,
+    disc_norm_col::Symbol=:mp_disc_norm,
+    line_coeffs=nothing
+)
+    if line_coeffs === nothing
+        error("Must provide regression line coefficients as line_coeffs=(a=..., b=...)")
+    end
+    a, b = line_coeffs.a, line_coeffs.b
+
+    mu_mp_vec = Vector{Vector{Union{Missing, Float64}}}(undef, nrow(df))
+    mu_mp_norm_vec = Vector{Vector{Union{Missing, Float64}}}(undef, nrow(df))
+    disc_norm_vec = Vector{Vector{Int}}(undef, nrow(df))
+
+    for (i, row) in enumerate(eachrow(df))
+        mu_vals = row[mu_col]
+        disc_vals = row[disc_col]
+        phi = row[phi_col]
+        mu_mp = [disc_vals[j] == 1 ? mu_vals[j] : missing for j in 1:length(mu_vals)]
+        nonmissing_mu = filter(!ismissing, mu_mp)
+        mu_start = isempty(nonmissing_mu) ? missing : first(nonmissing_mu)
+        mu_end = a * phi + b
+        if ismissing(mu_start) || mu_end == mu_start
+            mu_mp_norm = [ismissing(m) ? missing : 0.5 for m in mu_mp]
+        else
+            mu_mp_norm = [ismissing(m) ? missing : (m - mu_start) / (mu_end - mu_start) for m in mu_mp]
+        end
+        mu_mp_vec[i] = mu_mp
+        mu_mp_norm_vec[i] = mu_mp_norm
+        disc_norm_vec[i] = disc_vals
+    end
+
+    df[!, mu_mp_col] = mu_mp_vec
+    df[!, mu_mp_norm_col] = mu_mp_norm_vec
+    df[!, disc_norm_col] = disc_norm_vec
+    return df
+end
+
+## rervised version based on polynomial of best fitfunction fit_final_mp_poly(df::DataFrame; mu_col=:mu_values, disc_col=:disc_mp, phi_col=:phi, order::Int=1)
+function fit_final_mp_poly(df::DataFrame; mu_col=:mu_values, disc_col=:disc_mp, phi_col=:phi, order::Int=1, ignore_n_largest_phi::Int=0)
+    phi_vals = Float64[]
+    mu_final_mp = Float64[]
+    for row in eachrow(df)
+        mu_vec = row[mu_col]
+        disc_vec = row[disc_col]
+        idxs = findall(x -> x == 1, disc_vec)
+        if !isempty(idxs)
+            push!(phi_vals, row[phi_col])
+            push!(mu_final_mp, mu_vec[last(idxs)])
+        end
+    end
+    # Ignore the largest n phi values if requested
+    if ignore_n_largest_phi > 0 && length(phi_vals) > ignore_n_largest_phi
+        inds = sortperm(phi_vals)
+        keep_inds = inds[1:end-ignore_n_largest_phi]
+        phi_vals = phi_vals[keep_inds]
+        mu_final_mp = mu_final_mp[keep_inds]
+    end
+    # Polynomial fit: μ = p(φ)
+    p = fit(phi_vals, mu_final_mp, order)
+    return (poly=p, phi_vals=phi_vals, mu_final_mp=mu_final_mp)
+end
+
+function compute_phase_norm_with_poly!(
+    df::DataFrame;
+    mu_col::Symbol=:mu_values,
+    disc_col::Symbol=:disc_mp,
+    phi_col::Symbol=:phi,
+    mu_mp_col::Symbol=:mu_mp,
+    mu_mp_norm_col::Symbol=:mu_mp_norm,
+    disc_norm_col::Symbol=:mp_disc_norm,
+    poly=nothing
+)
+    if poly === nothing
+        error("Must provide polynomial as poly=...")
+    end
+
+    mu_mp_vec = Vector{Vector{Union{Missing, Float64}}}(undef, nrow(df))
+    mu_mp_norm_vec = Vector{Vector{Union{Missing, Float64}}}(undef, nrow(df))
+    disc_norm_vec = Vector{Vector{Int}}(undef, nrow(df))
+
+    for (i, row) in enumerate(eachrow(df))
+        mu_vals = row[mu_col]
+        disc_vals = row[disc_col]
+        phi = row[phi_col]
+        mu_mp = [disc_vals[j] == 1 ? mu_vals[j] : missing for j in 1:length(mu_vals)]
+        nonmissing_mu = filter(!ismissing, mu_mp)
+        mu_start = isempty(nonmissing_mu) ? missing : first(nonmissing_mu)
+        mu_end = poly(phi)
+        if ismissing(mu_start) || mu_end == mu_start
+            mu_mp_norm = [ismissing(m) ? missing : 0.5 for m in mu_mp]
+        else
+            mu_mp_norm = [ismissing(m) ? missing : (m - mu_start) / (mu_end - mu_start) for m in mu_mp]
+        end
+        mu_mp_vec[i] = mu_mp
+        mu_mp_norm_vec[i] = mu_mp_norm
+        disc_norm_vec[i] = disc_vals
+    end
+
+    df[!, mu_mp_col] = mu_mp_vec
+    df[!, mu_mp_norm_col] = mu_mp_norm_vec
+    df[!, disc_norm_col] = disc_norm_vec
+    return df
+end
+
+############################################
+########### IDOS Computation ###############
+############################################
 
 function compute_idop_df!(df::DataFrame; disc_variable::Symbol = :disc_mp)
     """
@@ -222,66 +447,6 @@ function find_idop_plateaus_from_idop(
 
     return plateau_idop
 end
-
-# function compute_idop_plateaus_all!(
-#     df::DataFrame;
-#     delta_idop_thresh::Float64 = 1e-4,
-#     min_mu_span::Float64 = 0.0,
-#     min_samples::Int = 3
-# )::DataFrame
-#     """
-#     Compute IDOP plateaus for every row in `df` and store result in column :plateaus.
-#     Uses the same plateau-detection logic as `find_idop_plateaus_from_idop` but operates
-#     on the full dataframe (no filtering). Returns the modified dataframe.
-#     """
-#     n = nrow(df)
-#     plateaus_col = Vector{Vector{Float64}}(undef, n)
-
-#     for (i, row) in enumerate(eachrow(df))
-#         mu_vals = get(row, :mu_values, nothing)
-#         idop = get(row, :idop, nothing)
-
-#         if mu_vals === nothing || idop === nothing || length(mu_vals) != length(idop) || length(idop) < 2
-#             plateaus_col[i] = Float64[]
-#             continue
-#         end
-
-#         diffs = abs.(diff(idop))
-#         flat_mask = diffs .<= delta_idop_thresh
-
-#         plateaus = Float64[]
-#         k = 1
-#         while k <= length(flat_mask)
-#             if !flat_mask[k]
-#                 k += 1
-#                 continue
-#             end
-#             run_start = k
-#             run_end = k
-#             while run_end + 1 <= length(flat_mask) && flat_mask[run_end + 1]
-#                 run_end += 1
-#             end
-
-#             # idop indices covered: run_start : (run_end+1)
-#             idx_a = run_start
-#             idx_b = run_end + 1
-#             n_points = idx_b - idx_a + 1
-#             mu_span = mu_vals[idx_b] - mu_vals[idx_a]
-
-#             if (min_mu_span > 0.0 && mu_span >= min_mu_span) || (n_points >= min_samples)
-#                 push!(plateaus, mean(idop[idx_a:idx_b]))
-#             end
-
-#             k = run_end + 1
-#         end
-
-#         plateaus_col[i] = plateaus
-#     end
-
-#     df.plateaus = plateaus_col
-#     return df
-# end
-
 
 function compute_idop_plateaus_all!(
     df::DataFrame;

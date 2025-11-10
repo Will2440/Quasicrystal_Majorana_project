@@ -4,10 +4,24 @@ include("plotting.jl")
 include("processing.jl")
 include("../../bson_unpacker.jl")
 
-data_folder = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N1000_phason_0.0-1-0.0_N(100-100-1)_t1(1.0-1.0-1_t2(1.5-1.5-1)_mu(0.0-0.0-1)_Delta(0.0-0.0-1)"
-run_set_name = "sturmian_sweep_t1-t2_swap"
+
+data_folder = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_tailoption-nothing_N1000_phason_0.0-1-0.0_const_mapping_N(500-500-1)_t1(1.0-1.0-1)_t2(1.5-1.5-1)_mu(0.0-0.0-1)_Delta(0.0-0.0-1)"
+run_set_name = "sturmian_sweep_t1-t2_const_mapping"
 folder_path_hof = normpath(joinpath(@__DIR__, "..", "..", "..", "raw_data", "np", run_set_name, data_folder))
 println("Unpacking Hofstadter data from folder: ", folder_path_hof)
+
+# using Glob
+# println("Checking folder: ", folder_path_hof)
+# println("Does folder exist? ", isdir(folder_path_hof))
+# bson_files = glob("*.bson", folder_path_hof)
+# println("BSON files found: ", bson_files)
+# if !isempty(bson_files)
+#     # Check first file's keys
+#     using BSON
+#     raw = BSON.load(bson_files[1])
+#     println("Keys in first BSON: ", collect(keys(raw)))
+# end
+
 
 df = unpack_bson_hofstadter(folder_path_hof)
 ## Rename columns
@@ -36,7 +50,7 @@ N = N_range[1]
 Delta = Delta_range[1]
 t_n = t_n_range[1]
 
-outdir = normpath(joinpath(@__DIR__, "..", "..", "..", "results", run_set_name, data_folder))
+outdir = normpath(joinpath(@__DIR__, "..", "..", "..", "results", run_set_name, "bp_results", data_folder))
 isdir(outdir) || mkpath(outdir)
 println("Saving results to folder: ", outdir)
 
@@ -45,74 +59,71 @@ plt_mu_range = mu_range #[1.0, 2.0, 3.0]
 plt_Delta_range = Delta_range
 plt_phason_range = phason_range #[0.0]
 
-slope_file = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/data_collection/auxilliary/sturm_grad_sets/sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false.bson"
+slope_file = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/data_collection/auxilliary/sturm_grad_sets/sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_tailoption-nothing.bson"
 
-# # for t_n in plt_tn_range
-# for phason in plt_phason_range
-#     for Delta in plt_Delta_range
-#         for mu in plt_mu_range
-#             plt_eval_projections(
-#                 df,
-#                 :eigenvalues,
-#                 :phi,
-#                 joinpath(outdir, "eval_projections_comps_mu$(mu)_Delta$(Delta)_tn$(t_n)_phason$(phason).png");
-#                 colour_rats = false,
-#                 colour_comps = true,
-#                 grad_filepath = slope_file,
-#                 mu = mu,
-#                 # N = N,
-#                 Delta = Delta,
-#                 # t_n = t_n,
-#                 phason = phason
-#             )
+println("plt_tn_range: ", plt_tn_range)
+println("plt_mu_range: ", plt_mu_range)
+println("plt_Delta_range: ", plt_Delta_range)
+println("plt_phason_range: ", plt_phason_range)
 
-#             plt_eval_projections(
-#                 df,
-#                 :eigs_norm,
-#                 :phi,
-#                 joinpath(outdir, "norm_eval_projections_comps_mu$(mu)_Delta$(Delta)_tn$(t_n)_phason$(phason).png");
-#                 colour_rats = false,
-#                 colour_comps = true,
-#                 grad_filepath = slope_file,
-#                 mu = mu,
-#                 # N = N,
-#                 Delta = Delta,
-#                 # t_n = t_n,
-#                 phason = phason
-#             )
 
-#             plt_eval_projections(
-#                 df,
-#                 :eigs_inner_norm,
-#                 :phi,
-#                 joinpath(outdir, "inner_norm_eval_projections_comps_mu$(mu)_Delta$(Delta)_tn$(t_n)_phason$(phason).png");
-#                 colour_rats = false,
-#                 colour_comps = true,
-#                 grad_filepath = slope_file,
-#                 mu = mu,
-#                 # N = N,
-#                 Delta = Delta,
-#                 # t_n = t_n,
-#                 phason = phason
-#             )
-#         end
-#     end
-# end
-# # end
+for t_n in plt_tn_range
+    for phason in plt_phason_range
+        for Delta in plt_Delta_range
+            for mu in plt_mu_range
+                plt_eval_projections(
+                    df,
+                    :eigenvalues,
+                    :phi,
+                    joinpath(outdir, "eval_projections_comps_mu$(mu)_Delta$(Delta)_tn$(t_n)_phason$(phason).png");
+                    colour_rats = false, #comment these in for using plt_eval_projections
+                    colour_comps = true,
+                    # colour_all = true,
+                    grad_filepath = slope_file,
+                    mu = mu,
+                    # N = N,
+                    Delta = Delta,
+                    t_n = t_n,
+                    phason = phason
+                )
+
+                plt_eval_projections(
+                    df,
+                    :eigs_norm,
+                    :phi,
+                    joinpath(outdir, "norm_eval_projections_comps_mu$(mu)_Delta$(Delta)_tn$(t_n)_phason$(phason).png");
+                    colour_rats = false,
+                    colour_comps = true,
+                    # colour_all = true,
+                    grad_filepath = slope_file,
+                    mu = mu,
+                    # N = N,
+                    Delta = Delta,
+                    t_n = t_n,
+                    phason = phason
+                )
+
+                plt_eval_projections(
+                    df,
+                    :eigs_inner_norm,
+                    :phi,
+                    joinpath(outdir, "inner_norm_eval_projections_comps_mu$(mu)_Delta$(Delta)_tn$(t_n)_phason$(phason).png");
+                    colour_rats = false,
+                    colour_comps = true,
+                    # colour_all = true,
+                    grad_filepath = slope_file,
+                    mu = mu,
+                    # N = N,
+                    Delta = Delta,
+                    # t_n = t_n,
+                    phason = phason
+                )
+            end
+        end
+    end
+end
 
 df = compute_idos_df!(df)
-
-# ##########################################
-# ### Naive plateau finding and plotting ###
-# ##########################################
-# df_idos_plateaus = compute_plateaus_df!(df; threshold=0.1)
-# for mu in plt_mu_range
-#     plt_plateaus_vs_phi(
-#         df_idos_plateaus,
-#         joinpath(outdir, "sturmian_sweep_idos_plateaus_vs_phi_mu$(mu).png");
-#         mu = mu
-#     )
-# end
 
 ################################################
 ## Gap-labelled plateau finding and plotting ###
@@ -131,26 +142,25 @@ df = compute_gap_labels_qlim!(df; p_range=p_range, q_max=q_max)
 # idos = row.idos
 # gap_labels = row.gap_labels
 
-# # plot_idos_with_gaps(energies, idos, gap_labels)
-# for phason in plt_phason_range
-#     for Delta in plt_Delta_range
-#         for mu in plt_mu_range
-#             plt_plateaus_vs_phi_coloured_legend(
-#                 df, 
-#                 joinpath(outdir, "idos_plateaus_vs_phi_coloured_legend_mu$(mu)_Delta$(Delta)_phason$(phason)_thresh$(threshold)_prange$(p_range)_qmax$(q_max).png"); 
-#                 mu=mu,
-#                 Delta=Delta,
-#                 phason=phason
-#             )
-#         end
-#     end
-# end
+# plot_idos_with_gaps(energies, idos, gap_labels)
+for phason in plt_phason_range
+    for Delta in plt_Delta_range
+        for mu in plt_mu_range
+            plt_plateaus_vs_phi_coloured_legend(
+                df, 
+                joinpath(outdir, "idos_plateaus_vs_phi_coloured_legend_mu$(mu)_Delta$(Delta)_phason$(phason)_thresh$(threshold)_prange$(p_range)_qmax$(q_max).png"); 
+                mu=mu,
+                Delta=Delta,
+                phason=phason
+            )
+        end
+    end
+end
 
 ##########################################
 ### Plotting gap-areas in energy space ###
 ##########################################
 
-# df_gaps = flatten_gap_intervals(df)
 @show names(df)
 @show typeof(df.gap_labels)
 @show eltype(df.gap_labels)
@@ -169,17 +179,17 @@ for phason in plt_phason_range
     for Delta in plt_Delta_range
         for mu in plt_mu_range
 
-            # plt_coloured_gaps_energy_vs_phi(
-            #     df,
-            #     joinpath(outdir, "gaps_energy_vs_phi_coloured_legend_mu$(mu)_Delta$(Delta)_phason$(phason)_thresh$(threshold)_prange$(p_range)_qmax$(q_max).png");
-            #     cmap=:viridis, #extreme_cmap, # :viridis
-            #     mu=mu,
-            #     Delta=Delta,
-            #     phason=phason,
-            #     atol=1e-8,
-            #     rtol=1e-6,
-            #     verbose=false
-            # )
+            plt_coloured_gaps_energy_vs_phi(
+                df,
+                joinpath(outdir, "gaps_energy_vs_phi_coloured_legend_mu$(mu)_Delta$(Delta)_phason$(phason)_thresh$(threshold)_prange$(p_range)_qmax$(q_max).png");
+                cmap=:viridis, #extreme_cmap, # :viridis
+                mu=mu,
+                Delta=Delta,
+                phason=phason,
+                atol=1e-8,
+                rtol=1e-6,
+                verbose=false
+            )
 
             plt_qled_coloured_gaps_energy_vs_phi(
                 df,

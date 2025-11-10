@@ -1,47 +1,9 @@
 using DataFrames
 using ProgressMeter
 
-# function prep_df_for_IDOS(df::DataFrame; fixed_values...)
-#     """
-#     Collect mu-range vectors and corresponding discretised indicators per unique (phi, N, t_n, Delta).
-#     Assumes :disc_mp exists (scalar 0/1 per row) and :disc_eigenvalues exists (Vector{Int} per row).
-#     Returns DataFrame with columns:
-#       :phi, :N, :t_n, :Delta, :mu_values, :disc_mp, :disc_evals_first
-#     """
-#     filtered_df = filter(row -> all(getproperty(row, k) == v for (k, v) in fixed_values), df)
-#     if isempty(filtered_df)
-#         error("No results match the specified fixed values.")
-#     end
-
-#     rows = Vector{Dict{Symbol,Any}}()
-
-#     for g in DataFrames.groupby(filtered_df, [:phi, :N, :t_n, :Delta])
-#         g_sorted = sort(g, :mu)
-
-#         mu_values = [r.mu for r in eachrow(g_sorted)]
-#         # assume disc_mp is scalar 0/1 (may be Float64 but integer-like)
-#         disc_mp_vals = [Int(r.disc_mp) for r in eachrow(g_sorted)]
-#         # assume disc_eigenvalues is a vector and we want its first element
-#         disc_eval_first_vals = [Int(r.disc_eigenvalues[1]) for r in eachrow(g_sorted)]
-
-#         eigenvalues_per_mu = [r.eigenvalues for r in eachrow(g_sorted)]
-
-#         first_row = first(g_sorted)
-
-#         push!(rows, Dict(
-#             :phi => first_row.phi,
-#             :N => first_row.N,
-#             :t_n => first_row.t_n,
-#             :Delta => first_row.Delta,
-#             :mu_values => mu_values,
-#             :disc_mp => disc_mp_vals,
-#             :disc_evals => disc_eval_first_vals,
-#             :eigenvalues => eigenvalues_per_mu
-#         ))
-#     end
-
-#     return DataFrame(rows)
-# end
+############################################
+######## Eigenvalue Normalisations #########
+############################################
 
 function compute_eigs_norm!(df::DataFrame; eigs_col::Symbol=:eigenvalues, out_col::Symbol=:eigs_norm, tol::Float64=1e-6)
     df[!, out_col] = Vector{Union{Vector{Float64}, Missing}}(undef, nrow(df))
@@ -130,6 +92,10 @@ function compute_eigs_inner_norm!(df::DataFrame; eigs_col::Symbol=:eigenvalues, 
     end
     return df
 end
+
+############################################
+########### IDOS Computation ###############
+############################################
 
 function compute_idos_df!(df::DataFrame)
     idos_col = Vector{Vector{Float64}}(undef, nrow(df))
@@ -301,69 +267,4 @@ function compute_gap_labels_qlim!(df::DataFrame; p_range::Vector{Int}=[0,1], q_m
 
     df.gap_labels = gap_labels
     return df
-end
-
-## for computing the areas in energy space coresponding to the idos plateaus (gap labelled).
-# function compute_gap_intervals_df(df::DataFrame; fixed_values...)
-#     """
-#     Build a DataFrame with one row per identified gap (from df.gap_labels).
-#     Returned DataFrame columns:
-#       :phi, :N, :t_n, :Delta, :mu, :phason,
-#       :E_low, :E_high, :N_gap, :p, :q
-
-#     Use this output to draw coloured gap bands in energy space.
-#     """
-#     filtered_df = filter(row -> all(getproperty(row, k) == v for (k, v) in fixed_values), df)
-#     if isempty(filtered_df)
-#         error("No results match the specified fixed values.")
-#     end
-
-#     rows = Vector{Dict{Symbol,Any}}()
-#     for row in eachrow(filtered_df)
-#         # Expect row.gap_labels to be a Vector{NamedTuple} with fields E_low, E_high, N_gap, p, q
-#         if !haskey(row, :gap_labels) || isempty(row.gap_labels)
-#             continue
-#         end
-#         for gap in row.gap_labels
-#             push!(rows, Dict(
-#                 :phi   => row.phi,
-#                 :N     => row.N,
-#                 :t_n   => row.t_n,
-#                 :Delta => row.Delta,
-#                 :mu    => row.mu,
-#                 :phason=> row.phason,
-#                 :E_low => gap.E_low,
-#                 :E_high=> gap.E_high,
-#                 :N_gap => gap.N_gap,
-#                 :p     => gap.p,
-#                 :q     => gap.q
-#             ))
-#         end
-#     end
-
-#     return DataFrame(rows)
-# end
-
-function flatten_gap_intervals(df::DataFrame)
-    # expects df has :gap_labels and a :phi column (and optionally :mu, :Delta, :phason)
-    rows = NamedTuple[]
-    has_mu = :mu in names(df); has_Delta = :Delta in names(df); has_phason = :phason in names(df)
-    for r in eachrow(df)
-        gls = r.gap_labels
-        (gls === nothing || isempty(gls)) && continue
-        for g in gls
-            push!(rows, (
-                E_low   = Float64(g.E_low),
-                E_high  = Float64(g.E_high),
-                phi     = Float64(r.phi),
-                p       = Int(g.p),
-                q       = Int(g.q),
-                N_gap   = Float64(g.N_gap),
-                mu      = has_mu ? Float64(r.mu) : NaN,
-                Delta   = has_Delta ? Float64(r.Delta) : NaN,
-                phason  = has_phason ? Float64(r.phason) : NaN,
-            ))
-        end
-    end
-    return DataFrame(rows)
 end

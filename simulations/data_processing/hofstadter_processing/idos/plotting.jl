@@ -6,6 +6,48 @@ using Colors
 
 size = (1200, 900)
 
+# function load_sturmian_grad_bson(path::AbstractString)
+#     @assert isfile(path) "BSON file not found: $path"
+#     raw = BSON.load(path)
+
+#     # normalize keys to Symbol -> value mapping
+#     norm = Dict{Symbol,Any}()
+#     for (k,v) in pairs(raw)
+#         # keys from BSON.load are usually strings; convert to Symbol safely
+#         kn = try
+#             Symbol(k)
+#         catch
+#             Symbol(string(k))
+#         end
+#         norm[kn] = v
+#     end
+
+#     # 1) If any value is already a DataFrame, return it
+#     for v in values(norm)
+#         if v isa DataFrame
+#             return deepcopy(v)   # return a copy to avoid accidental mutation of loaded object
+#         end
+#     end
+
+#     # 2) If top-level has prefix & slope arrays, build a DataFrame
+#     if (haskey(norm, :prefix) || haskey(norm, Symbol("prefix"))) &&
+#        (haskey(norm, :slope)  || haskey(norm, Symbol("slope")))
+#         pref = haskey(norm, :prefix) ? norm[:prefix] : norm[Symbol("prefix")]
+#         slp  = haskey(norm, :slope)  ? norm[:slope]  : norm[Symbol("slope")]
+#         return DataFrame(prefix = pref, slope = slp)
+#     end
+
+#     # 3) If the file contains a single value which is a Vector{NamedTuple}, convert it
+#     if length(norm) == 1
+#         v = first(values(norm))
+#         if isa(v, Vector) && !isempty(v) && v[1] isa NamedTuple
+#             return DataFrame(v)
+#         end
+#     end
+
+#     error("No DataFrame or recognizable (prefix,slope) data found in BSON file: $path. Keys: $(collect(keys(norm)))")
+# end
+
 function load_sturmian_grad_bson(path::AbstractString)
     @assert isfile(path) "BSON file not found: $path"
     raw = BSON.load(path)
@@ -29,7 +71,12 @@ function load_sturmian_grad_bson(path::AbstractString)
         end
     end
 
-    # 2) If top-level has prefix & slope arrays, build a DataFrame
+    # 2) Check for generalised format: seqs, phis, origins, phasons, types
+    if haskey(norm, :phis) && haskey(norm, :origins) && haskey(norm, :types)
+        return DataFrame(slope = norm[:phis], origin = norm[:origins], type = norm[:types])
+    end
+
+    # 3) If top-level has prefix & slope arrays, build a DataFrame
     if (haskey(norm, :prefix) || haskey(norm, Symbol("prefix"))) &&
        (haskey(norm, :slope)  || haskey(norm, Symbol("slope")))
         pref = haskey(norm, :prefix) ? norm[:prefix] : norm[Symbol("prefix")]
@@ -37,7 +84,7 @@ function load_sturmian_grad_bson(path::AbstractString)
         return DataFrame(prefix = pref, slope = slp)
     end
 
-    # 3) If the file contains a single value which is a Vector{NamedTuple}, convert it
+    # 4) If the file contains a single value which is a Vector{NamedTuple}, convert it
     if length(norm) == 1
         v = first(values(norm))
         if isa(v, Vector) && !isempty(v) && v[1] isa NamedTuple
@@ -47,6 +94,60 @@ function load_sturmian_grad_bson(path::AbstractString)
 
     error("No DataFrame or recognizable (prefix,slope) data found in BSON file: $path. Keys: $(collect(keys(norm)))")
 end
+
+
+# function load_sturmian_grad_bson(path::AbstractString)
+#     @assert isfile(path) "BSON file not found: $path"
+#     raw = BSON.load(path)
+
+#     # normalize keys to Symbol -> value mapping
+#     norm = Dict{Symbol,Any}()
+#     for (k,v) in pairs(raw)
+#         # keys from BSON.load are usually strings; convert to Symbol safely
+#         kn = try
+#             Symbol(k)
+#         catch
+#             Symbol(string(k))
+#         end
+#         norm[kn] = v
+#     end
+
+#     # 1) If any value is already a DataFrame, return it
+#     for v in values(norm)
+#         if v isa DataFrame
+#             return deepcopy(v)   # return a copy to avoid accidental mutation of loaded object
+#         end
+#     end
+
+#     # 2) Check for generalised format: seqs, phis, origins, types
+#     if haskey(norm, :phis) && haskey(norm, :origins) && haskey(norm, :types)
+#         return DataFrame(slope = norm[:phis], origin = norm[:origins], type = norm[:types])
+#     end
+
+#     # 3) Fallback for sequence files: phis, seqs, phasons (no origins/types)
+#     if haskey(norm, :phis) && haskey(norm, :seqs) && haskey(norm, :phasons)
+#         n = length(norm[:phis])
+#         return DataFrame(slope = norm[:phis], origin = fill("sequence", n), type = fill("unknown", n))
+#     end
+
+#     # 4) If top-level has prefix & slope arrays, build a DataFrame
+#     if (haskey(norm, :prefix) || haskey(norm, Symbol("prefix"))) &&
+#        (haskey(norm, :slope)  || haskey(norm, Symbol("slope")))
+#         pref = haskey(norm, :prefix) ? norm[:prefix] : norm[Symbol("prefix")]
+#         slp  = haskey(norm, :slope)  ? norm[:slope]  : norm[Symbol("slope")]
+#         return DataFrame(prefix = pref, slope = slp)
+#     end
+
+#     # 5) If the file contains a single value which is a Vector{NamedTuple}, convert it
+#     if length(norm) == 1
+#         v = first(values(norm))
+#         if isa(v, Vector) && !isempty(v) && v[1] isa NamedTuple
+#             return DataFrame(v)
+#         end
+#     end
+
+#     error("No DataFrame or recognizable (prefix,slope) data found in BSON file: $path. Keys: $(collect(keys(norm)))")
+# end
 
 function plt_eval_projections(
     df::DataFrame,
@@ -208,6 +309,224 @@ function plt_eval_projections(
         for (i, y) in enumerate(y_values)
             eigenvalues = real.(all_eigenvalues[i])
             Plots.scatter!(plt, eigenvalues, fill(Float64(y), length(eigenvalues)); markersize=1, markerstrokewidth=0, label=false)
+        end
+    end
+
+    Plots.savefig(savepath)
+    # Plots.display(plt)
+end
+
+function plt_eval_projections_fully_labelled(
+    df::DataFrame,
+    evals_col::Symbol,
+    y_variable::Symbol,
+    savepath::String;
+    colour_rats::Bool=false,
+    colour_comps::Bool=false,
+    colour_all::Bool=false,  # New parameter for all categorizations
+    grad_filepath::Union{String,Nothing}=nothing,
+    fixed_values...
+)
+    """
+    Plots projected eigenvalues along x-axis as a function of a specified variable from the DataFrame.
+
+    Parameters:
+    df           -- DataFrame containing the data.
+    y_variable   -- Symbol representing the variable to plot on the y-axis (transformed to angle 0 to π).
+    fixed_values -- Dictionary specifying fixed values for all other DataFrame columns.
+    colour_all   -- If true, color by all combinations of origin and type.
+    """
+
+    x_label = evals_col == :eigenvalues ? "Eigenvalues" :
+              evals_col == :eigs_norm  ? "Normalised Eigenvalues" :
+              string(evals_col)
+
+    # show legend only when colouring modes request it
+    legend_setting = (colour_comps || colour_rats || colour_all) ? :topright : false
+
+    plt = Plots.scatter(
+        legend=legend_setting,
+        xlabel=x_label,
+        ylabel="Angle (radians, 0 to π)",  # Updated ylabel
+        yticks=([-π/2, -π/4, 0, π/4, π/2], ["-π/2", "-π/4", "0", "π/4", "π/2"]),
+        grid=true,
+        size=size
+    )
+
+    filtered_df = filter(row -> all(getproperty(row, key) == value for (key, value) in fixed_values), df)
+
+    if isempty(filtered_df)
+        error("No results match the specified fixed values.")
+    end
+
+    y_values = filtered_df[:, y_variable]
+    all_eigenvalues = filtered_df[:, evals_col]
+
+    # Helper for float-safe comparison
+    matches_any = function(val, arr; tol=1e-6)
+        v = Float64(val)
+        for a in arr
+            if abs(v - Float64(a)) < tol
+                return true
+            end
+        end
+        return false
+    end
+
+    if colour_all
+        # grad_filepath must be provided
+        if grad_filepath === nothing
+            error("colour_all=true requires grad_filepath to be provided.")
+        end
+
+        grad_data = load_sturmian_grad_bson(grad_filepath)
+
+        # Collect all unique labels for coloring
+        unique_labels = unique(["$(row.type)_$(row.origin)" for row in eachrow(grad_data)])
+        n_colors = length(unique_labels)
+        colors = distinguishable_colors(n_colors, [RGB(1,1,1), RGB(0,0,0)])  # Avoid white/black if possible
+        label_to_color = Dict(label => colors[i] for (i, label) in enumerate(unique_labels))
+
+        # Buckets for each label
+        label_buckets = Dict(label => (Float64[], Float64[]) for label in unique_labels)
+
+        tol = 1e-6  # Tolerance for floating-point comparison
+
+        for (i, y) in enumerate(y_values)
+            eigenvalues = real.(all_eigenvalues[i])
+            yval = Float64(y)
+            transformed_y = atan(yval) #+ π/2  # Transform to angle 0 to π
+            label = "unknown"
+            for row in eachrow(grad_data)
+                if abs(row.slope - yval) < tol
+                    label = "$(row.type)_$(row.origin)"
+                    break
+                end
+            end
+            if !haskey(label_buckets, label)
+                label_buckets[label] = (Float64[], Float64[])
+                label_to_color[label] = :gray
+            end
+            append!(label_buckets[label][1], eigenvalues)
+            append!(label_buckets[label][2], fill(transformed_y, length(eigenvalues)))
+        end
+
+        # Plot each bucket
+        for (label, (x_vals, y_vals)) in label_buckets
+            if !isempty(x_vals)
+                Plots.scatter!(plt, x_vals, y_vals; markersize=1, markerstrokewidth=0, color=label_to_color[label], alpha=0.8, label=label)
+            end
+        end
+
+    elseif colour_comps
+        # grad_filepath must be provided
+        if grad_filepath === nothing
+            error("colour_comps=true requires grad_filepath to be provided.")
+        end
+
+        grad_data = load_sturmian_grad_bson(grad_filepath)
+
+        # extract a vector of phis from whatever load returned
+        raw_phis = Float64[]
+        if grad_data isa DataFrame
+            if :slope in names(grad_data)
+                raw_phis = Float64.(grad_data[:, :slope])
+            elseif :phi in names(grad_data)
+                raw_phis = Float64.(grad_data[:, :phi])
+            else
+                # pick first numeric column
+                found = false
+                for nm in names(grad_data)
+                    col = grad_data[:, nm]
+                    if eltype(col) <: Number || all(x->x isa Number, col)
+                        raw_phis = Float64.(col)
+                        found = true
+                        break
+                    end
+                end
+                if !found
+                    error("Could not find numeric phi/slope column in grad file DataFrame.")
+                end
+            end
+        elseif isa(grad_data, AbstractVector)
+            raw_phis = Float64.(grad_data)
+        else
+            error("Unexpected grad file format returned by load_sturmian_grad_bson.")
+        end
+
+        # classification buckets
+        raw_x = Float64[]; raw_y = Float64[]
+        comp_x = Float64[]; comp_y = Float64[]
+        other_x = Float64[]; other_y = Float64[]
+
+        for (i, y) in enumerate(y_values)
+            eigenvalues = real.(all_eigenvalues[i])
+            yval = Float64(y)
+            transformed_y = atan(yval) + π/2  # Transform to angle 0 to π
+            if matches_any(yval, raw_phis)
+                append!(raw_x, eigenvalues); append!(raw_y, fill(transformed_y, length(eigenvalues)))
+            elseif matches_any(yval, 1 .- raw_phis)
+                append!(comp_x, eigenvalues); append!(comp_y, fill(transformed_y, length(eigenvalues)))
+            else
+                append!(other_x, eigenvalues); append!(other_y, fill(transformed_y, length(eigenvalues)))
+            end
+        end
+
+        # plot order: other (background), comps (semi-transparent), raws (top)
+        if !isempty(other_x)
+            Plots.scatter!(plt, other_x, other_y; markersize=1, markerstrokewidth=0, color=:gray, alpha=0.95, label="rationals")
+        end
+        if !isempty(comp_x)
+            Plots.scatter!(plt, comp_x, comp_y; markersize=1, markerstrokewidth=0, color=:red, alpha=0.95, label="(1-φ)")
+        end
+        if !isempty(raw_x)
+            Plots.scatter!(plt, raw_x, raw_y; markersize=1, markerstrokewidth=0, color=:blue, alpha=0.35, label="φ")
+        end
+
+    elseif colour_rats
+        # helper: detect values equal to 1/r or 1 - 1/r within tol (r up to maxr)
+        is_1_over_r = function(phi; tol=1e-8, maxr=15)
+            # ensure numeric
+            ph = Float64(phi)
+            for r in 1:maxr
+                if abs(ph - 1/r) < tol || abs(ph - (1 - 1/r)) < tol
+                    return true
+                end
+            end
+            return false
+        end
+
+        rat_x = Float64[]
+        rat_y = Float64[]
+        irr_x = Float64[]
+        irr_y = Float64[]
+
+        for (i, y) in enumerate(y_values)
+            eigenvalues = real.(all_eigenvalues[i])
+            yval = Float64(y)
+            transformed_y = atan(yval) + π/2  # Transform to angle 0 to π
+            if is_1_over_r(yval)
+                append!(rat_x, eigenvalues)
+                append!(rat_y, fill(transformed_y, length(eigenvalues)))
+            else
+                append!(irr_x, eigenvalues)
+                append!(irr_y, fill(transformed_y, length(eigenvalues)))
+            end
+        end
+
+        # plot irrationals first (background colour), rationals on top
+        if !isempty(irr_x)
+            Plots.scatter!(plt, irr_x, irr_y; markersize=1, markerstrokewidth=0, color=:gray, alpha=0.35, label="irrational φ")
+        end
+        if !isempty(rat_x)
+            Plots.scatter!(plt, rat_x, rat_y; markersize=1, markerstrokewidth=0, color=:blue, alpha=0.95, label="1/r or 1-1/r φ")
+        end
+    else
+        # default behaviour: plot all eigenvalues the same way (no legend)
+        for (i, y) in enumerate(y_values)
+            eigenvalues = real.(all_eigenvalues[i])
+            transformed_y = atan(Float64(y)) + π/2  # Transform to angle 0 to π
+            Plots.scatter!(plt, eigenvalues, fill(transformed_y, length(eigenvalues)); markersize=1, markerstrokewidth=0, label=false)
         end
     end
 
