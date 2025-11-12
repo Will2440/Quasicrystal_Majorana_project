@@ -22,7 +22,7 @@ function prep_df_for_IDOP(df::DataFrame; fixed_values...)
 
     rows = Vector{Dict{Symbol,Any}}()
 
-    for g in DataFrames.groupby(filtered_df, [:phi, :N, :t_n, :Delta])
+    for g in DataFrames.groupby(filtered_df, [:phi, :N, :t_n, :Delta, :phason])
         g_sorted = sort(g, :mu)
 
         mu_values = [r.mu for r in eachrow(g_sorted)]
@@ -38,6 +38,7 @@ function prep_df_for_IDOP(df::DataFrame; fixed_values...)
             :N => first_row.N,
             :t_n => first_row.t_n,
             :Delta => first_row.Delta,
+            :phason => first_row.phason,
             :mu_values => mu_values,
             :disc_mp => disc_mp_vals,
             :disc_evals => disc_eval_first_vals
@@ -304,6 +305,7 @@ function compute_idop_df!(df::DataFrame; disc_variable::Symbol = :disc_mp)
     for (i, row) in enumerate(eachrow(df))
         vec = row[disc_variable]                  # expected AbstractVector{Int} or 0/1-like
         v = Int.(vec)                             # coerce elementwise
+
         total = sum(v)
         if total == 0
             # no matches -> IDOP stays zero (length preserved)
@@ -462,5 +464,69 @@ function compute_idop_plateaus_all!(
     )
     @assert length(plateaus) == nrow(df) "find_idop_plateaus_from_idop returned mismatched length"
     df.plateaus = plateaus
+    return df
+end
+
+function filter_idop_plateaus_at_1!(df::DataFrame; atol::Float64=1e-6)
+    """
+    Filter out plateaus in :plateaus column that are approximately equal to 1.0.
+    Assumes :plateaus is a Vector{Vector{Float64}} where each inner vector contains plateau IDOP values.
+    Modifies df in-place.
+    """
+    # if !(:plateaus in names(df))
+    #     error(":plateaus column not found in DataFrame")
+    # end
+    
+    for row in eachrow(df)
+        plateaus = row.plateaus
+        # Filter out values close to 1.0
+        filtered_plateaus = filter(p -> !isapprox(p, 1.0; atol=atol), plateaus)
+        row.plateaus = filtered_plateaus
+    end
+    
+    return df
+end
+
+############################################
+############# Gap Labelling ################
+############################################
+
+function compute_gap_labels_qlim!(df::DataFrame; p_range::Vector{Int}=collect(-5:5), q_max::Int=5)
+    gap_labels = Vector{Vector{NamedTuple}}(undef, nrow(df))
+    
+    for (i, row) in enumerate(eachrow(df))
+        plateaus = row.plateaus  # Vector of Float64 plateau values from compute_idop_plateaus_all!
+        phi = row.phi            # Float64 parameter for rational approximation
+        
+        label_list = NamedTuple[]
+        for plateau in plateaus
+            adjusted_plateau = plateau + 0.5
+            best_err = Inf
+            best_p = 0
+            best_q = 0
+            
+            # Search for best p/q such that plateau ≈ p + q * phi
+            for p_try in p_range
+                for q_try in -q_max:q_max
+                    if q_try == 0
+                        val = p_try  # Avoid division by zero
+                    else
+                        val = p_try + q_try * phi
+                    end
+                    err = abs(adjusted_plateau - val)
+                    if err < best_err
+                        best_err = err
+                        best_p = p_try
+                        best_q = q_try
+                    end
+                end
+            end
+            
+            push!(label_list, (plateau=adjusted_plateau, p=best_p, q=best_q, err=best_err))
+        end
+        gap_labels[i] = label_list
+    end
+    
+    df[!, :gap_labels] .= gap_labels
     return df
 end
