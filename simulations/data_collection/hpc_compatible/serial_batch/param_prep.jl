@@ -18,18 +18,19 @@ project_root = @__DIR__
 # =====================================================================
 
 sequences_dir = joinpath(project_root, "batch_params", "sequences")
-sequence_bson_file = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N1000_phason_0.0-1-0.0.bson"
+sequence_bson_file ="sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N10000_phason_0.0-1-0.0_const_mapping.bson
+"# "sturmian_slopes_K100_L4_balanced_bins5000_mpb2_r50_comp-false_tailoption-0_N500_phason_0.0-1-0.0_const_mapping.bson"
 
 # Parameter ranges (full vectors; will be chunked per row)
-Ns      = [500]                       # Vector{Int} (not chunked)
-mus_all = collect(range(0.0, 3.0; length=601))  # Vector{Float64}
-Deltas  = [0.0] #[0.0, 0.01, 0.05, 0.1, 0.2]             # Vector{Float64}
+Ns      = [5000]                       # Vector{Int} (not chunked)
+mus_all = collect(range(0.0, 3.0, 3001))  # Vector{Float64}
+Deltas  = [0.05]#, 0.01, 0.05, 0.1, 0.2]             # Vector{Float64}
 t1s     = [1.0]                  # Vector{Float64}
-t2s     = [1.5]#[1.5, 2.0, 2.5]             # Vector{Float64}
+t2s     = [1.5]#, 2.0, 2.5]             # Vector{Float64}
 t3s     = Float64[]                   # Vector{Float64} (empty = no t3)
 
 # Chunking parameters for each
-mu_vals_per_row = 10
+mu_vals_per_row = 30
 mu_split_mode = :contiguous  # :contiguous or :roundrobin
 delta_vals_per_row = length(Deltas)
 delta_split_mode = :contiguous
@@ -111,8 +112,10 @@ t3_info     = isempty(t3s)     ? "none" : string(replace(string(t3s[1]), "."=>"p
                                                 "-", replace(string(t3s[end]), "."=>"p"),
                                                 "-", length(t3s))
 
+chunk_info = "_mu$(mu_vals_per_row)_delta$(delta_vals_per_row)_t1$(t1_vals_per_row)_t2$(t2_vals_per_row)_t3$(t3_vals_per_row)_seq$(n_sequences_per_row)"
+
 out_file = joinpath(outdir,
-    "params_$(sequence_name)_Ns_$(ns_info)_mus_$(mus_info)_Deltas_$(deltas_info)_t1_$(t1_info)_t2_$(t2_info)_t3_$(t3_info)_nseq_$(n_sequences_per_row).dat")
+    "params_$(sequence_name)_Ns_$(ns_info)_mus_$(mus_info)_Deltas_$(deltas_info)_t1_$(t1_info)_t2_$(t2_info)_t3_$(t3_info)$(chunk_info).dat")
 
 # =====================================================================
 # Load sequences
@@ -141,6 +144,35 @@ for g in 1:n_seq_groups
 end
 
 # =====================================================================
+# Compute chunks for chunked variables
+# =====================================================================
+
+# Mus chunks
+mu_chunks = []
+if mu_vals_per_row < length(mus_all)
+    n_mu_chunks = ceil(Int, length(mus_all) / mu_vals_per_row)
+    for i in 1:n_mu_chunks
+        start_idx = (i-1)*mu_vals_per_row + 1
+        end_idx = min(i*mu_vals_per_row, length(mus_all))
+        push!(mu_chunks, mus_all[start_idx:end_idx])
+    end
+else
+    push!(mu_chunks, mus_all)
+end
+
+# Deltas chunks (not chunked)
+delta_chunks = [Deltas]
+
+# t1s chunks (not chunked)
+t1_chunks = [t1s]
+
+# t2s chunks (not chunked)
+t2_chunks = [t2s]
+
+# t3s chunks (not chunked)
+t3_chunks = [t3s]
+
+# =====================================================================
 # Helpers
 # =====================================================================
 
@@ -154,48 +186,49 @@ open(out_file, "w") do io
     header = join(("Ns", "mus", "Deltas", "t1s", "t2s", "t3s", "sequence_names", "sequence_ids", "sequences"), '\t')
     write(io, header * "\n")
     nrows = 0
-    total_rows = length(seq_groups)
 
-    for (row_idx, group) in enumerate(seq_groups)
-        group_seqs = group.seqs
-        group_phis = group.phis
-        group_phasons = group.phasons
+    for mu_chunk in mu_chunks
+        for group in seq_groups
+            group_seqs = group.seqs
+            group_phis = group.phis
+            group_phasons = group.phasons
 
-        # Truncate sequences to max(Ns) for this row
-        max_N = maximum(Ns)
-        truncated_sequences = Vector{Vector{Int}}()
-        for seq in group_seqs
-            if length(seq) < max_N
-                error("Sequence length $(length(seq)) < max_N=$max_N for row $row_idx")
+            # Truncate sequences to max(Ns) for this row
+            max_N = maximum(Ns)
+            truncated_sequences = Vector{Vector{Int}}()
+            for seq in group_seqs
+                if length(seq) < max_N
+                    error("Sequence length $(length(seq)) < max_N=$max_N for row $row_idx")
+                end
+                push!(truncated_sequences, seq[1:max_N])
             end
-            push!(truncated_sequences, seq[1:max_N])
+
+            # Collect sequence data for this group
+            sequence_names = fill(sequence_name, length(group_seqs))  # Vector{String}
+            sequence_ids = [(group_phis[i], group_phasons[i]) for i in 1:length(group_seqs)]  # Vector{Tuple{Float64,Float64}}
+            sequences = truncated_sequences  # Vector{Vector{Int}} (truncated to max_N)
+
+            # Use chunks for this row
+            mus_entry = literal(mu_chunk)
+            deltas_entry = literal(Deltas)
+            t1s_entry = literal(t1s)
+            t2s_entry = literal(t2s)
+            t3s_entry = literal(t3s)
+
+            row_vals = (
+                literal(Ns),
+                mus_entry,
+                deltas_entry,
+                t1s_entry,
+                t2s_entry,
+                t3s_entry,
+                literal(sequence_names),
+                literal(sequence_ids),
+                literal(sequences)
+            )
+            write(io, join(row_vals, '\t') * "\n")
+            nrows += 1
         end
-
-        # Collect sequence data for this group
-        sequence_names = fill(sequence_name, length(group_seqs))  # Vector{String}
-        sequence_ids = [(group_phis[i], group_phasons[i]) for i in 1:length(group_seqs)]  # Vector{Tuple{Float64,Float64}}
-        sequences = truncated_sequences  # Vector{Vector{Int}} (truncated to max_N)
-
-        # Chunk params for this row
-        mus_entry = chunk_policy(mus_all, row_idx, total_rows; vals_per_chunk=mu_vals_per_row, mode=mu_split_mode)
-        deltas_entry = chunk_policy(Deltas, row_idx, total_rows; vals_per_chunk=delta_vals_per_row, mode=delta_split_mode)
-        t1s_entry = chunk_policy(t1s, row_idx, total_rows; vals_per_chunk=t1_vals_per_row, mode=t1_split_mode)
-        t2s_entry = chunk_policy(t2s, row_idx, total_rows; vals_per_chunk=t2_vals_per_row, mode=t2_split_mode)
-        t3s_entry = chunk_policy(t3s, row_idx, total_rows; vals_per_chunk=t3_vals_per_row, mode=t3_split_mode)
-
-        row_vals = (
-            literal(Ns),
-            literal(mus_entry),
-            literal(deltas_entry),
-            literal(t1s_entry),
-            literal(t2s_entry),
-            literal(t3s_entry),
-            literal(sequence_names),
-            literal(sequence_ids),
-            literal(sequences)
-        )
-        write(io, join(row_vals, '\t') * "\n")
-        nrows += 1
     end
     # println("Wrote $nrows rows to $out_file")
 end
@@ -210,4 +243,4 @@ println("t3s (start, end, length): $(isempty(t3s) ? "none" : string(t3s[1], ", "
 println("Number of sequences: $(length(seq_groups))")
 println("______________________________________________")
 println("Number of rows: $(countlines(out_file) - 1)")
-println("Combinations per row: $(mu_vals_per_row*delta_vals_per_row*t1_vals_per_row*t2_vals_per_row*max(1, t3_vals_per_row)*n_sequences_per_row)")
+println("Combinations per row: $(mu_vals_per_row * length(Deltas) * length(t1s) * length(t2s) * (isempty(t3s) ? 1 : length(t3s)) * n_sequences_per_row)")
