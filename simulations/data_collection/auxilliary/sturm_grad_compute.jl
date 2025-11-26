@@ -10,8 +10,14 @@ using DataFrames
 ## Sturmian slope sampling
 K = 8
 L = 3
+
 tail_repeats = 50
-sturmian_slopes_df = SeqGen.sample_sturmian_slopes(K, L; tail_repeats=tail_repeats, measure=true)
+# sturmian_slopes_df = SeqGen.sample_sturmian_slopes(K, L; tail_repeats=tail_repeats, measure=true) # for standard tail repeats method
+
+tail_option = "random" # "random" or <nothing> or a particular non-negative integer
+tail_length = 50
+sturmian_slopes_df = SeqGen.sample_sturmian_slopes_custom(K, L; tail_option=tail_option, tail_length=tail_length, measure=true) # for custom tail repeats behaviour
+
 println("Sampled $(length(sturmian_slopes_df.slope)) Sturmian slopes with K=$K, L=$L and tail_repeats=$tail_repeats.")
 
 ## Add symmetric slopes (1 - phi)
@@ -122,7 +128,9 @@ plt_sturmian_slope_sampling_bins(
 
 
 ## save to BSON file
-@save joinpath(outdir, "sturmian_slopes_K$(K)_L$(L)_balanced_bins$(bins)_mpb$(max_per_bin)_r$(tail_repeats)_comp-$(comp).bson") balanced_sturm_df
-println("Saved balanced Sturmian slopes to $(joinpath(outdir, "sturmian_slopes_K$(K)_L$(L)_balanced.bson"))")
-@save joinpath(outdir, "sturmian_slopes_K$(K)_L$(L)_r$(tail_repeats)_comp-$(comp).bson") sturmian_slopes_df
-println("Saved raw Sturmian slopes to $(joinpath(outdir, "sturmian_slopes_K$(K)_L$(L).bson"))")
+bal_name = "sturmian_slopes_K$(K)_L$(L)_balanced_bins$(bins)_mpb$(max_per_bin)_r$(tail_repeats)_comp-$(comp)_tailoption-$(tail_option).bson"
+@save joinpath(outdir, bal_name) balanced_sturm_df
+println("Saved balanced Sturmian slopes to $(joinpath(outdir, bal_name))")
+raw_name = "sturmian_slopes_K$(K)_L$(L)_r$(tail_repeats)_comp-$(comp)_tailoption-$(tail_option).bson"
+@save joinpath(outdir, raw_name) sturmian_slopes_df
+println("Saved raw Sturmian slopes to $(joinpath(outdir, raw_name))")

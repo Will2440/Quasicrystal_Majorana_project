@@ -80,15 +80,27 @@ function process_bson_files(folder_path::String)
     return combined_dataframe
 end
 
-function calc_norms_df!(df::DataFrame)
-    df.rho = [row.t_n[2] / row.t_n[1] for row in eachrow(df)]
-    df.mu_t = [row.mu / row.t_n[1] for row in eachrow(df)]
-    df.Delta_t = [row.Delta / row.t_n[1] for row in eachrow(df)]
+# function calc_norms_df!(df::DataFrame)
+#     df.rho = [row.t_n[2] / row.t_n[1] for row in eachrow(df)]
+#     df.mu_t = [row.mu / row.t_n[1] for row in eachrow(df)]
+#     df.Delta_t = [row.Delta / row.t_n[1] for row in eachrow(df)]
 
-    if length(df.t_n[1]) == 3
-        df.sigma = [row.t_n[3] / row.t_n[1] for row in eachrow(df)]
-    else
-        nothing
+#     if length(df.t_n[1]) == 3
+#         df.sigma = [row.t_n[3] / row.t_n[1] for row in eachrow(df)]
+#     else
+#         nothing
+#     end
+
+#     return df
+# end
+
+function calc_norms_df!(df::DataFrame)
+    df.rho = [length(row.t_n) >= 2 ? row.t_n[2] / row.t_n[1] : NaN for row in eachrow(df)]
+    df.mu_t = [length(row.t_n) >= 1 ? row.mu / row.t_n[1] : NaN for row in eachrow(df)]
+    df.Delta_t = [length(row.t_n) >= 1 ? row.Delta / row.t_n[1] : NaN for row in eachrow(df)]
+
+    if any(length(row.t_n) >= 3 for row in eachrow(df))
+        df.sigma = [length(row.t_n) >= 3 ? row.t_n[3] / row.t_n[1] : NaN for row in eachrow(df)]
     end
 
     return df
