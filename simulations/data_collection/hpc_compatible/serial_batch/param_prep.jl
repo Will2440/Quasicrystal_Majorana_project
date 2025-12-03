@@ -10,6 +10,7 @@ using BSON
 using DataFrames
 using DelimitedFiles
 using Printf
+using Dates
 
 project_root = @__DIR__
 
@@ -18,19 +19,26 @@ project_root = @__DIR__
 # =====================================================================
 
 sequences_dir = joinpath(project_root, "batch_params", "sequences")
-sequence_bson_file ="sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N10000_phason_0.0-1-0.0_const_mapping.bson
-"# "sturmian_slopes_K100_L4_balanced_bins5000_mpb2_r50_comp-false_tailoption-0_N500_phason_0.0-1-0.0_const_mapping.bson"
+sequence_bson_file ="hof_style_slopes_N100_phason_0.0-101-1.0_nbins1000_npb1.bson"# "sturmian_slopes_K100_L4_balanced_bins5000_mpb2_r50_comp-false_tailoption-0_N500_phason_0.0-1-0.0_const_mapping.bson"
+
+# Sequence selection
+sequence_selection = :target_phason  # :all, :user_range, :target_slope, :target_phason
+sequence_indices = 100:100  # only used if :user_range
+target_slope = 0.5  # only used if :target_slope
+slope_tolerance = 0.01  # only used if :target_slope
+target_phason = 0.0  # only used if :target_phason
+phason_tolerance = 0.0001  # only used if :target_phason
 
 # Parameter ranges (full vectors; will be chunked per row)
-Ns      = [5000]                       # Vector{Int} (not chunked)
-mus_all = collect(range(0.0, 3.0, 3001))  # Vector{Float64}
+Ns      = [100]                       # Vector{Int} (not chunked)
+mus_all = collect(range(-3.0, 3.0, 1201)) #vcat(collect(range(0.6, 1.4, 401)), collect(range(1.8, 2.2, 201)))  # Vector{Float64}
 Deltas  = [0.05]#, 0.01, 0.05, 0.1, 0.2]             # Vector{Float64}
 t1s     = [1.0]                  # Vector{Float64}
 t2s     = [1.5]#, 2.0, 2.5]             # Vector{Float64}
 t3s     = Float64[]                   # Vector{Float64} (empty = no t3)
 
 # Chunking parameters for each
-mu_vals_per_row = 30
+mu_vals_per_row = 301
 mu_split_mode = :contiguous  # :contiguous or :roundrobin
 delta_vals_per_row = length(Deltas)
 delta_split_mode = :contiguous
@@ -40,8 +48,10 @@ t2_vals_per_row = length(t2s)
 t2_split_mode = :contiguous
 t3_vals_per_row = 1  # if t3s not empty
 t3_split_mode = :contiguous
-n_sequences_per_row = 1
-seq_split_mode = :contiguous
+slope_vals_per_row = 2
+phason_vals_per_row = 1
+phason_split_mode = :contiguous  # :contiguous or :roundrobin
+sequences_per_row = slope_vals_per_row * phason_vals_per_row
 
 # =====================================================================
 # Helpers
@@ -96,26 +106,35 @@ outdir = joinpath(project_root, "batch_params", "param_sets")
 isdir(outdir) || mkpath(outdir)
 sequence_name = splitext(sequence_bson_file)[1]
 
-# Build filename with range summaries
+# Build filename with range summaries (shortened to avoid filename length limits)
 ns_info     = isempty(Ns)      ? "none" : "$(Ns[1])-$(Ns[end])-$(length(Ns))"
-mus_info    = isempty(mus_all) ? "none" : string(replace(string(mus_all[1]), "."=>"p"),
-                                                "-", replace(string(mus_all[end]), "."=>"p"),
-                                                "-", length(mus_all))
+mus_info    = isempty(mus_all) ? "none" : string(mus_all[1], "-", mus_all[end], "-", length(mus_all))
 deltas_info = isempty(Deltas)  ? "none" : "$(Deltas[1])-$(Deltas[end])-$(length(Deltas))"
-t1_info     = isempty(t1s)     ? "none" : string(replace(string(t1s[1]), "."=>"p"),
-                                                "-", replace(string(t1s[end]), "."=>"p"),
-                                                "-", length(t1s))
-t2_info     = isempty(t2s)     ? "none" : string(replace(string(t2s[1]), "."=>"p"),
-                                                "-", replace(string(t2s[end]), "."=>"p"),
-                                                "-", length(t2s))
-t3_info     = isempty(t3s)     ? "none" : string(replace(string(t3s[1]), "."=>"p"),
-                                                "-", replace(string(t3s[end]), "."=>"p"),
-                                                "-", length(t3s))
+t1_info     = isempty(t1s)     ? "none" : string(t1s[1], "-", t1s[end], "-", length(t1s))
+t2_info     = isempty(t2s)     ? "none" : string(t2s[1], "-", t2s[end], "-", length(t2s))
+t3_info     = isempty(t3s)     ? "none" : "none"
 
-chunk_info = "_mu$(mu_vals_per_row)_delta$(delta_vals_per_row)_t1$(t1_vals_per_row)_t2$(t2_vals_per_row)_t3$(t3_vals_per_row)_seq$(n_sequences_per_row)"
+# Sequence selection info for filename (shortened)
+if sequence_selection == :all
+    seq_sel_info = "_all"
+elseif sequence_selection == :user_range
+    seq_sel_info = "_r$(sequence_indices[1])-$(sequence_indices[end])"
+elseif sequence_selection == :target_slope
+    seq_sel_info = "_s$(target_slope)_t$(slope_tolerance)"
+elseif sequence_selection == :target_phason
+    seq_sel_info = "_p$(target_phason)_t$(phason_tolerance)"
+else
+    seq_sel_info = "_unk"
+end
+
+# Shortened chunk info
+chunk_info = "_mu$(mu_vals_per_row)_d$(delta_vals_per_row)_t1$(t1_vals_per_row)_t2$(t2_vals_per_row)_slope$(slope_vals_per_row)_p$(phason_vals_per_row)"
+
+# Create a timestamp-based unique identifier
+timestamp = replace(string(now()), r"[^\d]" => "")[1:14]  # YYYYMMDDHHMMSS format
 
 out_file = joinpath(outdir,
-    "params_$(sequence_name)_Ns_$(ns_info)_mus_$(mus_info)_Deltas_$(deltas_info)_t1_$(t1_info)_t2_$(t2_info)_t3_$(t3_info)$(chunk_info).dat")
+    "params_$(sequence_name)_$(timestamp)$(seq_sel_info)$(chunk_info)_Ns$(ns_info)_mus$(mus_info)_D$(deltas_info)_t1$(t1_info)_t2$(t2_info).dat")
 
 # =====================================================================
 # Load sequences
@@ -132,16 +151,64 @@ phis = Float64.(raw[:phis])
 phasons = haskey(raw, :phasons) ? Float64.(raw[:phasons]) : fill(0.0, length(phis))
 length(seqs) == length(phis) == length(phasons) || error("Mismatched lengths in BSON arrays")
 
+total_sequences = length(seqs)  # Store total before filtering
+
+# =====================================================================
+# Sequence selection
+# =====================================================================
+
+if sequence_selection == :user_range
+    max_idx = length(seqs)
+    original_indices = sequence_indices
+    sequence_indices = clamp.(sequence_indices, 1, max_idx)
+    if original_indices != sequence_indices
+        println("Warning: Some sequence indices were out of range. Valid range is 1:$(max_idx). Clamped to: $(sequence_indices)")
+    end
+    seqs = seqs[sequence_indices]
+    phis = phis[sequence_indices]
+    phasons = phasons[sequence_indices]
+elseif sequence_selection == :target_slope
+    mask = abs.(phis .- target_slope) .<= slope_tolerance
+    seqs = seqs[mask]
+    phis = phis[mask]
+    phasons = phasons[mask]
+elseif sequence_selection == :target_phason
+    mask = abs.(phasons .- target_phason) .<= phason_tolerance
+    seqs = seqs[mask]
+    phis = phis[mask]
+    phasons = phasons[mask]
+elseif sequence_selection != :all
+    error("Unknown sequence_selection: $sequence_selection. Use :all, :user_range, :target_slope, or :target_phason")
+end
+
 # =====================================================================
 # Generate sequence groups
 # =====================================================================
 
-n_seq_groups = ceil(Int, length(seqs) / n_sequences_per_row)
+# Sort sequences by slope (phi) then phason
+sorted_indices = sortperm(collect(zip(phis, phasons)))
+seqs = seqs[sorted_indices]
+phis = phis[sorted_indices]
+phasons = phasons[sorted_indices]
+
+# Group into chunks of sequences_per_row
 seq_groups = []
-for g in 1:n_seq_groups
-    group_seqs, group_phis, group_phasons = sequence_group_policy(seqs, phis, phasons, g, n_seq_groups; n_groups=n_seq_groups, mode=seq_split_mode)
+n_groups = ceil(Int, length(seqs) / sequences_per_row)
+for g in 1:n_groups
+    start_idx = (g-1)*sequences_per_row + 1
+    end_idx = min(g*sequences_per_row, length(seqs))
+    group_seqs = seqs[start_idx:end_idx]
+    group_phis = phis[start_idx:end_idx]
+    group_phasons = phasons[start_idx:end_idx]
     push!(seq_groups, (seqs=group_seqs, phis=group_phis, phasons=group_phasons))
 end
+
+# # Estimate output size and warn if too large
+# estimated_rows = length(mu_chunks) * length(seq_groups)
+# println("Estimated number of parameter rows: $estimated_rows")
+# if estimated_rows > 1000
+#     error("Estimated $(estimated_rows) rows would generate a very large file (disk quota exceeded). Please reduce parameter ranges (e.g., smaller mu range, fewer sequences, or larger chunks).")
+# end
 
 # =====================================================================
 # Compute chunks for chunked variables
@@ -240,7 +307,26 @@ println("Deltas (start, end, length): $(Deltas[1]), $(Deltas[end]), $(length(Del
 println("t1s (start, end, length): $(t1s[1]), $(t1s[end]), $(length(t1s))")
 println("t2s (start, end, length): $(t2s[1]), $(t2s[end]), $(length(t2s))")
 println("t3s (start, end, length): $(isempty(t3s) ? "none" : string(t3s[1], ", ", t3s[end], ", ", length(t3s)))")
-println("Number of sequences: $(length(seq_groups))")
+println("Number of sequences: $(length(seqs)) out of $(total_sequences)")
+if sequence_selection == :user_range
+    println("Using filtering: $(sequence_selection) with indices: $(sequence_indices)")
+elseif sequence_selection == :target_slope
+    println("Using filtering: $(sequence_selection) with target slope: $(target_slope) ± $(slope_tolerance)")
+elseif sequence_selection == :target_phason
+    println("Using filtering: $(sequence_selection) with target phason: $(target_phason) ± $(phason_tolerance)")
+elseif sequence_selection == :all
+    println("Using filtering: $(sequence_selection)")
+end
+println("______________________________________________")
+println("Chunking info:")
+println("  mus: $mu_vals_per_row per row, mode: $mu_split_mode")
+println("  Deltas: $delta_vals_per_row per row, mode: $delta_split_mode")
+println("  t1s: $t1_vals_per_row per row, mode: $t1_split_mode")
+println("  t2s: $t2_vals_per_row per row, mode: $t2_split_mode")
+println("  t3s: $t3_vals_per_row per row, mode: $t3_split_mode")
+println("  slopes: $slope_vals_per_row per row")
+println("  phasons: $phason_vals_per_row per row, mode: $phason_split_mode")
+println("  sequences: $sequences_per_row per row")
 println("______________________________________________")
 println("Number of rows: $(countlines(out_file) - 1)")
-println("Combinations per row: $(mu_vals_per_row * length(Deltas) * length(t1s) * length(t2s) * (isempty(t3s) ? 1 : length(t3s)) * n_sequences_per_row)")
+println("Combinations per row: $(mu_vals_per_row * length(Deltas) * length(t1s) * length(t2s) * (isempty(t3s) ? 1 : length(t3s)) * sequences_per_row)")
