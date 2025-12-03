@@ -1,3 +1,5 @@
+module IDOSProcessing
+
 using DataFrames
 using ProgressMeter
 
@@ -239,6 +241,12 @@ function compute_gap_labels_qlim!(df::DataFrame; p_range::Vector{Int}=[0,1], q_m
 
             factor = phi
 
+            # Guard against phi ≈ 0 to avoid division by zero and Inf errors
+            if !isfinite(phi) || abs(phi) < eps(Float64)
+                push!(label_list, (E_low=E_low, E_high=E_high, N_gap=N_gap, p=missing, q=missing, err=missing))
+                continue
+            end
+
             for p_try in p_range
                 q_candidate = round(Int, (N_gap - p_try) / factor)
 
@@ -268,3 +276,5 @@ function compute_gap_labels_qlim!(df::DataFrame; p_range::Vector{Int}=[0,1], q_m
     df.gap_labels = gap_labels
     return df
 end
+
+end # module IDOSProcessing

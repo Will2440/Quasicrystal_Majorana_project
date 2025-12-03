@@ -1,58 +1,20 @@
+module IDOSPlotting
+
 using DataFrames
 using Plots
 using BSON
 using Statistics
 using Colors
+using StatsBase: groupby
 
 size = (1200, 900)
 
-# function load_sturmian_grad_bson(path::AbstractString)
-#     @assert isfile(path) "BSON file not found: $path"
-#     raw = BSON.load(path)
-
-#     # normalize keys to Symbol -> value mapping
-#     norm = Dict{Symbol,Any}()
-#     for (k,v) in pairs(raw)
-#         # keys from BSON.load are usually strings; convert to Symbol safely
-#         kn = try
-#             Symbol(k)
-#         catch
-#             Symbol(string(k))
-#         end
-#         norm[kn] = v
-#     end
-
-#     # 1) If any value is already a DataFrame, return it
-#     for v in values(norm)
-#         if v isa DataFrame
-#             return deepcopy(v)   # return a copy to avoid accidental mutation of loaded object
-#         end
-#     end
-
-#     # 2) If top-level has prefix & slope arrays, build a DataFrame
-#     if (haskey(norm, :prefix) || haskey(norm, Symbol("prefix"))) &&
-#        (haskey(norm, :slope)  || haskey(norm, Symbol("slope")))
-#         pref = haskey(norm, :prefix) ? norm[:prefix] : norm[Symbol("prefix")]
-#         slp  = haskey(norm, :slope)  ? norm[:slope]  : norm[Symbol("slope")]
-#         return DataFrame(prefix = pref, slope = slp)
-#     end
-
-#     # 3) If the file contains a single value which is a Vector{NamedTuple}, convert it
-#     if length(norm) == 1
-#         v = first(values(norm))
-#         if isa(v, Vector) && !isempty(v) && v[1] isa NamedTuple
-#             return DataFrame(v)
-#         end
-#     end
-
-#     error("No DataFrame or recognizable (prefix,slope) data found in BSON file: $path. Keys: $(collect(keys(norm)))")
-# end
 
 function load_sturmian_grad_bson(path::AbstractString)
     @assert isfile(path) "BSON file not found: $path"
     raw = BSON.load(path)
 
-    # normalize keys to Symbol -> value mapping
+    # normalise keys to Symbol -> value mapping
     norm = Dict{Symbol,Any}()
     for (k,v) in pairs(raw)
         # keys from BSON.load are usually strings; convert to Symbol safely
@@ -94,60 +56,6 @@ function load_sturmian_grad_bson(path::AbstractString)
 
     error("No DataFrame or recognizable (prefix,slope) data found in BSON file: $path. Keys: $(collect(keys(norm)))")
 end
-
-
-# function load_sturmian_grad_bson(path::AbstractString)
-#     @assert isfile(path) "BSON file not found: $path"
-#     raw = BSON.load(path)
-
-#     # normalize keys to Symbol -> value mapping
-#     norm = Dict{Symbol,Any}()
-#     for (k,v) in pairs(raw)
-#         # keys from BSON.load are usually strings; convert to Symbol safely
-#         kn = try
-#             Symbol(k)
-#         catch
-#             Symbol(string(k))
-#         end
-#         norm[kn] = v
-#     end
-
-#     # 1) If any value is already a DataFrame, return it
-#     for v in values(norm)
-#         if v isa DataFrame
-#             return deepcopy(v)   # return a copy to avoid accidental mutation of loaded object
-#         end
-#     end
-
-#     # 2) Check for generalised format: seqs, phis, origins, types
-#     if haskey(norm, :phis) && haskey(norm, :origins) && haskey(norm, :types)
-#         return DataFrame(slope = norm[:phis], origin = norm[:origins], type = norm[:types])
-#     end
-
-#     # 3) Fallback for sequence files: phis, seqs, phasons (no origins/types)
-#     if haskey(norm, :phis) && haskey(norm, :seqs) && haskey(norm, :phasons)
-#         n = length(norm[:phis])
-#         return DataFrame(slope = norm[:phis], origin = fill("sequence", n), type = fill("unknown", n))
-#     end
-
-#     # 4) If top-level has prefix & slope arrays, build a DataFrame
-#     if (haskey(norm, :prefix) || haskey(norm, Symbol("prefix"))) &&
-#        (haskey(norm, :slope)  || haskey(norm, Symbol("slope")))
-#         pref = haskey(norm, :prefix) ? norm[:prefix] : norm[Symbol("prefix")]
-#         slp  = haskey(norm, :slope)  ? norm[:slope]  : norm[Symbol("slope")]
-#         return DataFrame(prefix = pref, slope = slp)
-#     end
-
-#     # 5) If the file contains a single value which is a Vector{NamedTuple}, convert it
-#     if length(norm) == 1
-#         v = first(values(norm))
-#         if isa(v, Vector) && !isempty(v) && v[1] isa NamedTuple
-#             return DataFrame(v)
-#         end
-#     end
-
-#     error("No DataFrame or recognizable (prefix,slope) data found in BSON file: $path. Keys: $(collect(keys(norm)))")
-# end
 
 function plt_eval_projections(
     df::DataFrame,
@@ -324,6 +232,7 @@ function plt_eval_projections_fully_labelled(
     colour_rats::Bool=false,
     colour_comps::Bool=false,
     colour_all::Bool=false,  # New parameter for all categorizations
+    transform_y::Bool=true,  # Toggle: true for atan(slope) (angle), false for raw slope
     grad_filepath::Union{String,Nothing}=nothing,
     fixed_values...
 )
@@ -332,8 +241,9 @@ function plt_eval_projections_fully_labelled(
 
     Parameters:
     df           -- DataFrame containing the data.
-    y_variable   -- Symbol representing the variable to plot on the y-axis (transformed to angle 0 to π).
-    fixed_values -- Dictionary specifying fixed values for all other DataFrame columns.
+    y_variable   -- Symbol representing the variable to plot on the y-axis.
+    transform_y  -- If true, transform y to atan(y) (angle in radians, 0 to π/2).
+                     If false, use raw y values (slope).
     colour_all   -- If true, color by all combinations of origin and type.
     """
 
@@ -341,17 +251,35 @@ function plt_eval_projections_fully_labelled(
               evals_col == :eigs_norm  ? "Normalised Eigenvalues" :
               string(evals_col)
 
-    # show legend only when colouring modes request it
+    # Show legend only when colouring modes request it
     legend_setting = (colour_comps || colour_rats || colour_all) ? :topright : false
 
-    plt = Plots.scatter(
-        legend=legend_setting,
-        xlabel=x_label,
-        ylabel="Angle (radians, 0 to π)",  # Updated ylabel
-        yticks=([-π/2, -π/4, 0, π/4, π/2], ["-π/2", "-π/4", "0", "π/4", "π/2"]),
-        grid=true,
-        size=size
+    # Set y-axis properties based on transform_y toggle
+    if transform_y
+        ylabel = "Angle (radians, 0 to π/2)"
+        yticks = ([0, pi/8, π/4, 3pi/8, π/2], ["0", "π/8", "π/4", "3π/8", "π/2"])
+        ylims = (0, π/2)
+    else
+        ylabel = "Slope"
+        yticks = nothing  # Use default ticks
+        ylims = :auto     # Auto-limits (fixed: was nothing, which causes warning)
+    end
+
+    # Conditionally build the scatter kwargs to include yticks only when transform_y is true
+    scatter_kwargs = Dict(
+        :legend => legend_setting,
+        :xlabel => x_label,
+        :ylabel => ylabel,
+        :ylims => ylims,
+        :grid => true,
+        :size => size
     )
+    if transform_y
+        scatter_kwargs[:yticks] = yticks
+    end
+
+    plt = Plots.scatter(; scatter_kwargs...)
+
 
     filtered_df = filter(row -> all(getproperty(row, key) == value for (key, value) in fixed_values), df)
 
@@ -371,6 +299,12 @@ function plt_eval_projections_fully_labelled(
             end
         end
         return false
+    end
+
+    # Helper to compute y-value for plotting (applies transformation if enabled)
+    compute_y_plot = function(yval)
+        yval_float = Float64(yval)
+        return transform_y ? atan(yval_float) : yval_float
     end
 
     if colour_all
@@ -395,7 +329,7 @@ function plt_eval_projections_fully_labelled(
         for (i, y) in enumerate(y_values)
             eigenvalues = real.(all_eigenvalues[i])
             yval = Float64(y)
-            transformed_y = atan(yval) #+ π/2  # Transform to angle 0 to π
+            y_plot = compute_y_plot(yval)
             label = "unknown"
             for row in eachrow(grad_data)
                 if abs(row.slope - yval) < tol
@@ -408,7 +342,7 @@ function plt_eval_projections_fully_labelled(
                 label_to_color[label] = :gray
             end
             append!(label_buckets[label][1], eigenvalues)
-            append!(label_buckets[label][2], fill(transformed_y, length(eigenvalues)))
+            append!(label_buckets[label][2], fill(y_plot, length(eigenvalues)))
         end
 
         # Plot each bucket
@@ -426,7 +360,7 @@ function plt_eval_projections_fully_labelled(
 
         grad_data = load_sturmian_grad_bson(grad_filepath)
 
-        # extract a vector of phis from whatever load returned
+        # Extract a vector of phis from whatever load returned
         raw_phis = Float64[]
         if grad_data isa DataFrame
             if :slope in names(grad_data)
@@ -434,7 +368,7 @@ function plt_eval_projections_fully_labelled(
             elseif :phi in names(grad_data)
                 raw_phis = Float64.(grad_data[:, :phi])
             else
-                # pick first numeric column
+                # Pick first numeric column
                 found = false
                 for nm in names(grad_data)
                     col = grad_data[:, nm]
@@ -454,7 +388,7 @@ function plt_eval_projections_fully_labelled(
             error("Unexpected grad file format returned by load_sturmian_grad_bson.")
         end
 
-        # classification buckets
+        # Classification buckets
         raw_x = Float64[]; raw_y = Float64[]
         comp_x = Float64[]; comp_y = Float64[]
         other_x = Float64[]; other_y = Float64[]
@@ -462,17 +396,17 @@ function plt_eval_projections_fully_labelled(
         for (i, y) in enumerate(y_values)
             eigenvalues = real.(all_eigenvalues[i])
             yval = Float64(y)
-            transformed_y = atan(yval) + π/2  # Transform to angle 0 to π
+            y_plot = compute_y_plot(yval)
             if matches_any(yval, raw_phis)
-                append!(raw_x, eigenvalues); append!(raw_y, fill(transformed_y, length(eigenvalues)))
+                append!(raw_x, eigenvalues); append!(raw_y, fill(y_plot, length(eigenvalues)))
             elseif matches_any(yval, 1 .- raw_phis)
-                append!(comp_x, eigenvalues); append!(comp_y, fill(transformed_y, length(eigenvalues)))
+                append!(comp_x, eigenvalues); append!(comp_y, fill(y_plot, length(eigenvalues)))
             else
-                append!(other_x, eigenvalues); append!(other_y, fill(transformed_y, length(eigenvalues)))
+                append!(other_x, eigenvalues); append!(other_y, fill(y_plot, length(eigenvalues)))
             end
         end
 
-        # plot order: other (background), comps (semi-transparent), raws (top)
+        # Plot order: other (background), comps (semi-transparent), raws (top)
         if !isempty(other_x)
             Plots.scatter!(plt, other_x, other_y; markersize=1, markerstrokewidth=0, color=:gray, alpha=0.95, label="rationals")
         end
@@ -484,9 +418,9 @@ function plt_eval_projections_fully_labelled(
         end
 
     elseif colour_rats
-        # helper: detect values equal to 1/r or 1 - 1/r within tol (r up to maxr)
+        # Helper: detect values equal to 1/r or 1 - 1/r within tol (r up to maxr)
         is_1_over_r = function(phi; tol=1e-8, maxr=15)
-            # ensure numeric
+            # Ensure numeric
             ph = Float64(phi)
             for r in 1:maxr
                 if abs(ph - 1/r) < tol || abs(ph - (1 - 1/r)) < tol
@@ -504,17 +438,17 @@ function plt_eval_projections_fully_labelled(
         for (i, y) in enumerate(y_values)
             eigenvalues = real.(all_eigenvalues[i])
             yval = Float64(y)
-            transformed_y = atan(yval) + π/2  # Transform to angle 0 to π
+            y_plot = compute_y_plot(yval)
             if is_1_over_r(yval)
                 append!(rat_x, eigenvalues)
-                append!(rat_y, fill(transformed_y, length(eigenvalues)))
+                append!(rat_y, fill(y_plot, length(eigenvalues)))
             else
                 append!(irr_x, eigenvalues)
-                append!(irr_y, fill(transformed_y, length(eigenvalues)))
+                append!(irr_y, fill(y_plot, length(eigenvalues)))
             end
         end
 
-        # plot irrationals first (background colour), rationals on top
+        # Plot irrationals first (background colour), rationals on top
         if !isempty(irr_x)
             Plots.scatter!(plt, irr_x, irr_y; markersize=1, markerstrokewidth=0, color=:gray, alpha=0.35, label="irrational φ")
         end
@@ -522,11 +456,11 @@ function plt_eval_projections_fully_labelled(
             Plots.scatter!(plt, rat_x, rat_y; markersize=1, markerstrokewidth=0, color=:blue, alpha=0.95, label="1/r or 1-1/r φ")
         end
     else
-        # default behaviour: plot all eigenvalues the same way (no legend)
+        # Default behaviour: plot all eigenvalues the same way (no legend)
         for (i, y) in enumerate(y_values)
             eigenvalues = real.(all_eigenvalues[i])
-            transformed_y = atan(Float64(y)) + π/2  # Transform to angle 0 to π
-            Plots.scatter!(plt, eigenvalues, fill(transformed_y, length(eigenvalues)); markersize=1, markerstrokewidth=0, label=false)
+            y_plot = compute_y_plot(Float64(y))
+            Plots.scatter!(plt, eigenvalues, fill(y_plot, length(eigenvalues)); markersize=1, markerstrokewidth=0, label=false)
         end
     end
 
@@ -1111,3 +1045,369 @@ function plt_qled_coloured_gaps_energy_vs_phi(
     savefig(plt, savepath)
     return plt
 end
+
+function plt_coloured_gaps_q_optionality(
+    df::DataFrame,
+    savepath::String;
+    p_range::Union{AbstractVector{<:Integer},Nothing}=nothing,
+    q_max::Union{Int,Nothing}=nothing,
+    cmap::Any = :viridis,
+    xlabel::String="Energy",
+    ylabel::String="φ",
+    title::Union{String,Nothing}=nothing,
+    verbose::Bool=false,
+    atol::Real=1e-9,
+    rtol::Real=0.0,
+    colour_mode::Symbol = :qled_p,
+    normalise_energy::Bool = false,
+    norm_tol::Real = 1e-6,
+    line_width::Int = 4,
+    fixed_values...
+)
+    # approx-aware filtering on row-level context columns
+    _kv_match(row, key, val) = begin
+        rv = getproperty(row, key)
+        (rv isa Number && val isa Number) ? isapprox(rv, val; atol=atol, rtol=rtol) : (rv == val)
+    end
+    _row_matches(row, kvs) = all(_kv_match(row, k, v) for (k,v) in kvs)
+
+    filtered_rows = isempty(fixed_values) ? df :
+                    filter(row -> _row_matches(row, fixed_values), df)
+
+    if isempty(filtered_rows)
+        if verbose
+            @info "No rows match fixed_values" keys=keys(Dict(fixed_values))
+        end
+        error("No gaps match the specified fixed values.")
+    end
+
+    # # Collect gaps
+    # lows  = Float64[]; highs = Float64[]; phis = Float64[]
+    # ps    = Int[];     qs    = Int[]
+    # pq_set = Set{Tuple{Int,Int}}()
+    # q_to_ps = Dict{Int, Vector{Int}}()
+
+    # for row in eachrow(filtered_rows)
+    #     gls = getproperty(row, :gap_labels)
+    #     (gls === nothing || isempty(gls)) && continue
+    #     phi = Float64(row.phi)
+    #     for g in gls
+    #         p = Int(g.p); q = Int(g.q)
+    #         if p_range !== nothing && !(p in p_range); continue; end
+    #         if q_max   !== nothing && abs(q) > q_max; continue; end
+    #         push!(lows,  Float64(g.E_low))
+    #         push!(highs, Float64(g.E_high))
+    #         push!(phis,  phi)
+    #         push!(ps,    p)
+    #         push!(qs,    q)
+    #         push!(pq_set, (p,q))
+    #         q_to_ps[q] = get(q_to_ps, q, Int[])
+    #         if !(p in q_to_ps[q])
+    #             push!(q_to_ps[q], p)
+    #         end
+    #     end
+    # end
+
+    # isempty(lows) && error("No gaps remain after filtering.")
+
+    # Collect gaps
+    lows  = Float64[]; highs = Float64[]; phis = Float64[]
+    ps    = Int[];     qs    = Int[]
+    pq_set = Set{Tuple{Int,Int}}()
+    q_to_ps = Dict{Int, Vector{Int}}()
+
+    row_idx = 0
+    for row in eachrow(filtered_rows)
+        row_idx += 1
+        gls = getproperty(row, :gap_labels)
+        (gls === nothing || isempty(gls)) && continue
+        phi = Float64(row.phi)
+        norm_map = normalise_energy ? make_energy_normaliser(row; tol=norm_tol) : identity
+        for g in gls
+            p = Int(g.p); q = Int(g.q)
+            if p_range !== nothing && !(p in p_range); continue; end
+            if q_max   !== nothing && abs(q) > q_max; continue; end
+            push!(lows,  normalise_energy ? norm_map(Float64(g.E_low))  : Float64(g.E_low))
+            push!(highs, normalise_energy ? norm_map(Float64(g.E_high)) : Float64(g.E_high))
+            push!(phis,  phi)
+            push!(ps,    p)
+            push!(qs,    q)
+            push!(pq_set, (p,q))
+            q_to_ps[q] = get(q_to_ps, q, Int[])
+            if !(p in q_to_ps[q])
+                push!(q_to_ps[q], p)
+            end
+        end
+    end
+
+    isempty(lows) && error("No gaps remain after filtering.")
+
+
+    # Keys for coloring: either q or |q|
+    key_list = Int[]
+    if colour_mode in [:qled_p, :qled_notp]
+        key_list = sort(collect(keys(q_to_ps)))
+    elseif colour_mode in [:absq_p, :absq_notp]
+        key_set = Set{Int}()
+        for q in keys(q_to_ps)
+            push!(key_set, abs(q))
+        end
+        key_list = sort(collect(key_set))
+    else
+        error("Invalid colour_mode=$colour_mode (use :qled_p, :qled_notp, :absq_p, :absq_notp)")
+    end
+    n_key = length(key_list)
+
+    # Base colours
+    base_colors = if isa(cmap, Symbol) || isa(cmap, String)
+        cgrad(cmap, n_key; categorical=true).colors
+    elseif isa(cmap, AbstractVector)
+        length(cmap) >= n_key ? cmap[1:n_key] : cgrad(cmap, n_key; categorical=true).colors
+    else
+        cgrad(:viridis, n_key; categorical=true).colors
+    end
+
+    # Map each (p,q) -> colour and legend label
+    pq_to_color = Dict{Tuple{Int,Int}, Colorant}()
+    pq_to_label = Dict{Tuple{Int,Int}, String}()
+
+    # Helper: legend text per mode
+    legend_label(p,q) = begin
+        if colour_mode == :qled_p
+            "(p=$p, q=$q)"
+        elseif colour_mode == :qled_notp
+            "q = $q"
+        elseif colour_mode == :absq_p
+            "(p=$p, q=$q, |q|=$(abs(q)))"
+        elseif colour_mode == :absq_notp
+            "|q| = $(abs(q))"
+        else
+            ""
+        end
+    end
+
+    for (ki, key) in enumerate(key_list)
+        if colour_mode in [:qled_p, :absq_p]
+            # Vary colour by p within key
+            ps_for_key = Int[]
+            if colour_mode == :qled_p
+                ps_for_key = sort(q_to_ps[key])
+            elseif colour_mode == :absq_p
+                for q in keys(q_to_ps)
+                    if abs(q) == key
+                        append!(ps_for_key, q_to_ps[q])
+                    end
+                end
+                ps_for_key = sort(unique(ps_for_key))
+            end
+            n_p = length(ps_for_key)
+            base_hsv = HSV(base_colors[ki])
+
+            for (pi, pval) in enumerate(ps_for_key)
+                t = n_p == 1 ? 0.5 : (pi - 1) / (n_p - 1)
+                v_new = clamp(0.45 + 0.50 * t, 0.0, 1.0)
+                s_new = clamp(0.6 + 0.35 * (1 - t), 0.0, 1.0)
+                color_p = RGB(HSV(base_hsv.h, s_new, v_new))
+
+                if colour_mode == :qled_p
+                    pq = (pval, key)
+                    pq_to_color[pq] = color_p
+                    pq_to_label[pq] = legend_label(pq[1], pq[2])
+                else # :absq_p
+                    for q in keys(q_to_ps)
+                        if abs(q) == key && pval in q_to_ps[q]
+                            pq = (pval, q)
+                            pq_to_color[pq] = color_p
+                            pq_to_label[pq] = legend_label(pq[1], pq[2])
+                        end
+                    end
+                end
+            end
+
+        else
+            # :qled_notp or :absq_notp – same colour for all p in key
+            color_key = base_colors[ki]
+            if colour_mode == :qled_notp
+                q = key
+                for p in q_to_ps[q]
+                    pq = (p, q)
+                    pq_to_color[pq] = color_key
+                    pq_to_label[pq] = legend_label(pq[1], pq[2])  # label is "q = q"
+                end
+            else # :absq_notp
+                for q in keys(q_to_ps)
+                    if abs(q) == key
+                        for p in q_to_ps[q]
+                            pq = (p, q)
+                            pq_to_color[pq] = color_key
+                            pq_to_label[pq] = legend_label(pq[1], pq[2])  # label is "|q| = |q|"
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    # Axes ranges
+    xmin = minimum(lows); xmax = maximum(highs)
+    ymin = minimum(phis); ymax = maximum(phis)
+    x_span = xmax - xmin; x_span = x_span == 0 ? 1.0 : x_span
+    y_span = ymax - ymin; y_span = y_span == 0 ? 1.0 : y_span
+
+    # Band half-height in φ units
+    h = max(1e-6, 0.5 * min(0.02 * y_span, (0.9 * y_span) / max(1, length(unique(phis)))))
+
+    # Default titles by mode if not provided
+    default_title = begin
+        if colour_mode == :qled_p
+            "Gaps in Energy vs φ (colour by p and q)"
+        elseif colour_mode == :qled_notp
+            "Gaps in Energy vs φ (colour by q)"
+        elseif colour_mode == :absq_p
+            "Gaps in Energy vs φ (colour by |q| and p)"
+        elseif colour_mode == :absq_notp
+            "Gaps in Energy vs φ (colour by |q|)"
+        else
+            "Gaps in Energy vs φ"
+        end
+    end
+
+    plt = plot(
+        xlabel = xlabel,
+        ylabel = ylabel,
+        legend = :outerright,
+        grid   = true,
+        size   = size,
+        title  = isnothing(title) ? default_title : title,
+    )
+
+    # Group indices by (p,q) so we can plot each group once for legend
+    # Manual grouping to avoid dependency if not wanted:
+    pq_to_indices = Dict{Tuple{Int,Int}, Vector{Int}}()
+    for i in eachindex(lows)
+        pq = (ps[i], qs[i])
+        push!(get!(pq_to_indices, pq, Int[]), i)
+    end
+
+    # # Plot each group with one legend entry
+    # if colour_mode == :absq_notp
+    #     # Only one legend entry per |q|
+    #     absq_to_indices = Dict{Int, Vector{Int}}()
+    #     absq_to_color = Dict{Int, Colorant}()
+    #     for (pq, idxs) in pq_to_indices
+    #         absq = abs(pq[2])
+    #         absq_to_indices[absq] = get(absq_to_indices, absq, Int[])
+    #         append!(absq_to_indices[absq], idxs)
+    #         absq_to_color[absq] = pq_to_color[pq]
+    #     end
+    #     for absq in sort(collect(keys(absq_to_indices)))
+    #         idxs = absq_to_indices[absq]
+    #         col = absq_to_color[absq]
+    #         lbl = "|q| = $absq"
+    #         xs_all = Float64[]; ys_all = Float64[]
+    #         for i in idxs
+    #             phi = phis[i]
+    #             append!(xs_all, [lows[i], highs[i], NaN])
+    #             append!(ys_all, [phi,      phi,      NaN])
+    #         end
+    #         plot!(plt, xs_all, ys_all;
+    #             seriestype=:path,
+    #             linecolor=col,
+    #             linewidth=4,
+    #             label=lbl)
+    #     end
+    # # Plot each group with one legend entry
+    if colour_mode in (:qled_notp, :absq_notp)
+        key_to_indices = Dict{Int, Vector{Int}}()
+        key_to_color   = Dict{Int, Colorant}()
+
+        for (pq, idxs) in pq_to_indices
+            key = colour_mode == :qled_notp ? pq[2] : abs(pq[2])
+            push!(get!(key_to_indices, key, Int[]), idxs...)
+            key_to_color[key] = pq_to_color[pq]
+        end
+
+        for key in sort(collect(keys(key_to_indices)))
+            idxs = key_to_indices[key]
+            col  = key_to_color[key]
+            lbl  = colour_mode == :qled_notp ? "q = $key" : "|q| = $key"
+
+            xs_all = Float64[]; ys_all = Float64[]
+            for i in idxs
+                phi = phis[i]
+                append!(xs_all, [lows[i], highs[i], NaN])
+                append!(ys_all, [phi, phi, NaN])
+            end
+
+            plot!(plt, xs_all, ys_all; seriestype=:path, linecolor=col, linewidth=line_width, label=lbl)
+        end
+    else
+        # Default: one legend entry per (p,q)
+        for (pq, idxs) in sort(collect(pq_to_indices); by=x->(x[1][2], x[1][1]))
+            col = pq_to_color[pq]
+            lbl = pq_to_label[pq]
+            xs_all = Float64[]; ys_all = Float64[]
+            for i in idxs
+                phi = phis[i]
+                append!(xs_all, [lows[i], highs[i], NaN])
+                append!(ys_all, [phi,      phi,      NaN])
+            end
+            plot!(plt, xs_all, ys_all;
+                seriestype=:path,
+                linecolor=col,
+                linewidth=4,
+                label=lbl)
+        end
+    end
+
+    # Add some right margin for legend
+    plot!(plt, xlim=(xmin, xmax + 0.10 * x_span))
+
+    savefig(plt, savepath)
+    return plt
+end
+
+# helper to build per-row energy normalisers that match compute_eigs_norm! scaling
+function make_energy_normaliser(row; eigs_col::Symbol=:eigenvalues, tol::Real=1e-6)
+    es = getproperty(row, eigs_col)
+    if es === nothing || es === missing || isempty(es)
+        return identity
+    end
+
+    vals = sort!(collect(real(es)))
+    vals = [x for x in vals if abs(x) > tol]
+    isempty(vals) && return identity
+
+    negs = [x for x in vals if x < 0.0]
+    poss = [x for x in vals if x > 0.0]
+
+    neg_abs = abs.(negs)
+    amin = isempty(neg_abs) ? 0.0 : minimum(neg_abs)
+    amax = isempty(neg_abs) ? 1.0 : maximum(neg_abs)
+
+    pmin = isempty(poss) ? 0.0 : minimum(poss)
+    pmax = isempty(poss) ? 1.0 : maximum(poss)
+
+    neg_denom = amax - amin
+    pos_denom = pmax - pmin
+
+    return x -> begin
+        if !isfinite(x) || abs(x) <= tol
+            0.0
+        elseif x < 0
+            if neg_denom <= tol
+                -1.0
+            else
+                clamp(-((abs(x) - amin) / neg_denom), -1.0, 0.0)
+            end
+        else
+            if pos_denom <= tol
+                1.0
+            else
+                clamp(((x - pmin) / pos_denom), 0.0, 1.0)
+            end
+        end
+    end
+end
+
+end # module IDOSPlotting

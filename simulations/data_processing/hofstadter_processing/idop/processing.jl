@@ -1,3 +1,5 @@
+module IDOPProcessing
+
 using Statistics
 using DataFrames
 using Polynomials
@@ -48,54 +50,27 @@ function prep_df_for_IDOP(df::DataFrame; fixed_values...)
     return DataFrame(rows)
 end
 
-## original, based on indexing disc_mp to mu_values and stretching mu_values ot fit
-# function compute_phase_norm!(df::DataFrame; mu_col::Symbol=:mu_values, disc_col::Symbol=:disc_mp, mu_norm_col::Symbol=:mu_values_norm, disc_norm_col::Symbol=:mp_disc_norm)
-#     """
-#     For each row, normalize :mu_values so that the mu at the first disc_mp=1 maps to 0,
-#     and the mu at the last disc_mp=1 maps to 1. Add :mu_values_norm and :mp_disc_norm (unchanged disc_mp).
-#     Assumes df has :mu_values (Vector) and :disc_mp (Vector) per row.
-#     """
-#     # if !(mu_col in names(df)) || !(disc_col in names(df))
-#     #     error("Required columns $mu_col and $disc_col not found in DataFrame")
-#     # end
-    
-#     mu_norm_vec = Vector{Vector{Float64}}(undef, nrow(df))
-#     disc_norm_vec = Vector{Vector{Int}}(undef, nrow(df))
-    
-#     for (i, row) in enumerate(eachrow(df))
-#         mu_vals = row[mu_col]
-#         disc_vals = row[disc_col]
-        
-#         # Find indices where disc_mp == 1
-#         idxs = findall(x -> x == 1, disc_vals)
-#         if isempty(idxs)
-#             # No 1s, perhaps set norm to original or handle
-#             mu_norm_vec[i] = mu_vals  # or zeros, but let's assume there are
-#             disc_norm_vec[i] = disc_vals
-#             continue
-#         end
-        
-#         idx_first = first(idxs)
-#         idx_last = last(idxs)
-        
-#         mu_first = mu_vals[idx_first]
-#         mu_last = mu_vals[idx_last]
-        
-#         if mu_last == mu_first
-#             # Degenerate, set to 0.5 or something
-#             mu_norm_vec[i] = fill(0.5, length(mu_vals))
-#         else
-#             mu_norm_vec[i] = (mu_vals .- mu_first) ./ (mu_last - mu_first)
-#         end
-        
-#         disc_norm_vec[i] = disc_vals  # unchanged
-#     end
-    
-#     df[!, mu_norm_col] = mu_norm_vec
-#     df[!, disc_norm_col] = disc_norm_vec
-    
-#     return df
-# end
+function prep_df_for_IDOP_single(df_slice::DataFrame, phi_val::Float64, phason_val::Float64, N_val::Int, Delta_val::Float64, t_n::Vector{Float64})
+    """
+    Prepare a single-row DataFrame for IDOP computation from a slice DataFrame.
+    Assumes df_slice has :mu, :disc_mp, :eigenvalues columns.
+    Returns DataFrame with columns: :phi, :N, :t_n, :Delta, :phason, :mu_values, :disc_mp, :disc_evals
+    """
+    mu_values = df_slice.mu
+    disc_mp_vals = Int.(df_slice.disc_mp)  # Ensure Int
+
+    row = Dict(
+        :phi => phi_val,
+        :N => N_val,
+        :t_n => t_n,
+        :Delta => Delta_val,
+        :phason => phason_val,
+        :mu_values => mu_values,
+        :disc_mp => disc_mp_vals,
+    )
+
+    return DataFrame([row])
+end
 
 ## revised version creating :mu_mp and :mu_mp_norm, a list of mu values where disc_mp == 1 (else missing), and normalized version
 function compute_phase_norm!(df::DataFrame; mu_col::Symbol=:mu_values, disc_col::Symbol=:disc_mp, mu_mp_col::Symbol=:mu_mp, mu_mp_norm_col::Symbol=:mu_mp_norm, disc_norm_col::Symbol=:mp_disc_norm)
@@ -285,15 +260,88 @@ function compute_phase_norm_with_poly!(
     return df
 end
 
+function compute_phase_norm_with_poly_inplace!(
+    df::DataFrame;
+    mu_col::Symbol=:mu_values,
+    disc_col::Symbol=:disc_mp,
+    phi_col::Symbol=:phi,
+    mu_mp_col::Symbol=:mu_mp,
+    mu_mp_norm_col::Symbol=:mu_mp_norm,
+    disc_norm_col::Symbol=:mp_disc_norm,
+    poly=nothing
+)
+    if poly === nothing
+        error("Must provide polynomial as poly=...")
+    end
+
+    for row in eachrow(df)
+        mu_vals = row[mu_col]
+        disc_vals = row[disc_col]
+        phi = row[phi_col]
+        mu_mp = [disc_vals[j] == 1 ? mu_vals[j] : missing for j in 1:length(mu_vals)]
+        nonmissing_mu = filter(!ismissing, mu_mp)
+        mu_start = isempty(nonmissing_mu) ? missing : first(nonmissing_mu)
+        mu_end = poly(phi)
+        if ismissing(mu_start) || mu_end == mu_start
+            mu_mp_norm = [ismissing(m) ? missing : 0.5 for m in mu_mp]
+        else
+            mu_mp_norm = [ismissing(m) ? missing : (m - mu_start) / (mu_end - mu_start) for m in mu_mp]
+        end
+        row[mu_mp_col] = mu_mp
+        row[mu_mp_norm_col] = mu_mp_norm
+        row[disc_norm_col] = disc_vals
+    end
+    return df
+end
+
 ############################################
-########### IDOS Computation ###############
+########### IDOP Computation ###############
 ############################################
 
-function compute_idop_df!(df::DataFrame; disc_variable::Symbol = :disc_mp)
+# function compute_idop_df!(df::DataFrame; disc_variable::Symbol = :disc_mp)
+#     """
+#     Compute Integrated Density Of Phase-gaps (IDOP) from a discretised column.
+#     Normalises each cumulative count by the total number of positive entries so the final value = 1
+#     when there is at least one match. If there are zero matches the IDOP is a zero-vector.
+#     """
+#     if !(disc_variable in names(df) || string(disc_variable) in names(df))
+#         error("discretised column $(disc_variable) not found in DataFrame")
+#     end
+
+#     n = nrow(df)
+#     idop_col = Vector{Vector{Float64}}(undef, n)
+
+#     for (i, row) in enumerate(eachrow(df))
+#         vec = row[disc_variable]                  # expected AbstractVector{Int} or 0/1-like
+#         v = Int.(vec)                             # coerce elementwise
+
+#         total = sum(v)
+#         if total == 0
+#             # no matches -> IDOP stays zero (length preserved)
+#             idop_col[i] = zeros(Float64, length(v))
+#         else
+#             idop_col[i] = cumsum(v) ./ float(total)
+#         end
+
+#         idop_col[i] = 0.5 .+ 0.5 .* idop_col[i]   # rescale to [0.5, 1.0]
+#     end
+
+#     df.idop = idop_col
+#     return df
+# end
+
+
+function compute_idop_df!(
+    df::DataFrame;
+    disc_variable::Symbol = :disc_mp,
+    rescale_idop::Bool = true
+)
     """
     Compute Integrated Density Of Phase-gaps (IDOP) from a discretised column.
-    Normalises each cumulative count by the total number of positive entries so the final value = 1
-    when there is at least one match. If there are zero matches the IDOP is a zero-vector.
+    For binary (Int/Bool) disc_variable: Normalises each cumulative count by the total number of positive entries so the final value = 1
+    when there is at least one match. If there are zero matches the IDOP is a zero-vector. Gaps are identified as 0s.
+    For Float64/Missing disc_variable (e.g. mu_mp): IDOP is a cumulative sum over non-missing values, holding constant (plateau) over missing values.
+    Normalizes by the total number of non-missing entries, then rescales to [0.5, 1.0] if rescale_idop=true.
     """
     if !(disc_variable in names(df) || string(disc_variable) in names(df))
         error("discretised column $(disc_variable) not found in DataFrame")
@@ -303,15 +351,46 @@ function compute_idop_df!(df::DataFrame; disc_variable::Symbol = :disc_mp)
     idop_col = Vector{Vector{Float64}}(undef, n)
 
     for (i, row) in enumerate(eachrow(df))
-        vec = row[disc_variable]                  # expected AbstractVector{Int} or 0/1-like
-        v = Int.(vec)                             # coerce elementwise
+        vec = row[disc_variable]
 
-        total = sum(v)
-        if total == 0
-            # no matches -> IDOP stays zero (length preserved)
-            idop_col[i] = zeros(Float64, length(v))
+        if eltype(vec) <: Union{Int, Bool}
+            # Binary case: gaps as 0s, accumulate 1s
+            v = Int.(vec)
+            total = sum(v)
+            if total == 0
+                idop = zeros(Float64, length(v))
+            else
+                idop = cumsum(v) ./ float(total)
+            end
+            if rescale_idop
+                idop_col[i] = 0.5 .+ 0.5 .* idop   # rescale to [0.5, 1.0]
+            else
+                idop_col[i] = idop
+            end
+        elseif eltype(vec) <: Union{Float64, Missing} || eltype(vec) == Any
+            # mu_mp case: cumulative sum over non-missing, plateau over missing
+            is_valid = .!ismissing.(vec)
+            total = count(is_valid)
+            idop = zeros(Float64, length(vec))
+            acc = 0
+            if total == 0
+                # No non-missing values, IDOP stays zero
+                idop .= 0.0
+            else
+                for j in 1:length(vec)
+                    if is_valid[j]
+                        acc += 1
+                    end
+                    idop[j] = acc / total
+                end
+            end
+            if rescale_idop
+                idop_col[i] = 0.5 .+ 0.5 .* idop
+            else
+                idop_col[i] = idop
+            end
         else
-            idop_col[i] = cumsum(v) ./ float(total)
+            error("Unsupported element type for disc_variable: $(eltype(vec))")
         end
     end
 
@@ -379,6 +458,116 @@ function find_idop_plateaus_from_disc(
     return plateau_idop
 end
 
+
+#############################################
+# function find_idop_plateaus_from_idop(
+#     df::DataFrame;
+#     delta_idop_thresh::Float64 = 1e-4,   # max allowed |ΔIDOP| between consecutive samples inside a flat region
+#     min_mu_span::Float64 = 0.0,          # minimal mu span (absolute) for a plateau; 0.0 disables mu-span check
+#     min_samples::Int = 3,                # minimal number of IDOP points in plateau (>=2 diffs -> points = diffs+1)
+#     fixed_values...
+# )
+#     """
+#     Detect IDOP plateaus by scanning idop (Vector{Float64}) vs mu_values (Vector{Float64}).
+#     Returns Vector{Vector{Float64}} aligned with filtered rows where each inner vector
+#     contains plateau y-values (mean IDOP over the flat region).
+
+#     Plateaus are contiguous runs where abs(diff(idop)) <= delta_idop_thresh.
+#     A run is reported if either:
+#       - its mu span >= min_mu_span (and min_mu_span > 0), OR
+#       - number of IDOP samples in the run >= min_samples.
+#     """
+#     filtered_df = filter(row -> all(getproperty(row, k) == v for (k, v) in fixed_values), df)
+#     if isempty(filtered_df)
+#         error("No results match the specified fixed values.")
+#     end
+
+#     plateau_idop = Vector{Vector{Float64}}(undef, nrow(filtered_df))
+
+#     for (i, row) in enumerate(eachrow(filtered_df))
+#         mu_vals = get(row, :mu_values, nothing)
+#         idop = get(row, :idop, nothing)
+
+#         if mu_vals === nothing || idop === nothing || length(mu_vals) != length(idop) || length(idop) < 2
+#             plateau_idop[i] = Float64[]   # not enough data or missing
+#             continue
+#         end
+
+#         L = length(idop)
+#         diffs = abs.(diff(idop))  # length L-1
+#         # boolean mask where consecutive points are "flat"
+#         flat_mask = diffs .<= delta_idop_thresh
+
+#         plateaus = Float64[]
+#         k = 1
+#         while k <= length(flat_mask)
+#             if !flat_mask[k]
+#                 k += 1
+#                 continue
+#             end
+#             # start of run at diff index `k`
+#             run_start = k
+#             run_end = k
+#             while run_end + 1 <= length(flat_mask) && flat_mask[run_end + 1]
+#                 run_end += 1
+#             end
+#             # run covers diffs indices run_start:run_end -> corresponds to idop indices run_start:(run_end+1)
+#             idx_a = run_start
+#             idx_b = run_end + 1  # inclusive idop index
+#             n_points = idx_b - idx_a + 1
+#             mu_span = mu_vals[idx_b] - mu_vals[idx_a]   # span between first and last mu in plateau
+
+#             if (min_mu_span > 0.0 && mu_span >= min_mu_span) || (n_points >= min_samples)
+#                 # report plateau y-value as mean (robust to small residual noise)
+#                 push!(plateaus, mean(idop[idx_a:idx_b]))
+#             end
+
+#             k = run_end + 1
+#         end
+
+#         plateau_idop[i] = plateaus
+#     end
+
+#     return plateau_idop
+# end
+
+# function compute_idop_plateaus_all!(
+#     df::DataFrame;
+#     delta_idop_thresh::Float64 = 1e-4,
+#     min_mu_span::Float64 = 0.0,
+#     min_samples::Int = 3
+# )::DataFrame
+#     plateaus = find_idop_plateaus_from_idop(
+#         df;
+#         delta_idop_thresh = delta_idop_thresh,
+#         min_mu_span = min_mu_span,
+#         min_samples = min_samples
+#     )
+#     @assert length(plateaus) == nrow(df) "find_idop_plateaus_from_idop returned mismatched length"
+#     df.plateaus = plateaus
+#     return df
+# end
+
+# function filter_idop_plateaus_at_1!(df::DataFrame; atol::Float64=1e-6)
+#     """
+#     Filter out plateaus in :plateaus column that are approximately equal to 1.0.
+#     Assumes :plateaus is a Vector{Vector{Float64}} where each inner vector contains plateau IDOP values.
+#     Modifies df in-place.
+#     """
+#     # if !(:plateaus in names(df))
+#     #     error(":plateaus column not found in DataFrame")
+#     # end
+    
+#     for row in eachrow(df)
+#         plateaus = row.plateaus
+#         # Filter out values close to 1.0
+#         filtered_plateaus = filter(p -> !isapprox(p, 1.0; atol=atol), plateaus)
+#         row.plateaus = filtered_plateaus
+#     end
+    
+#     return df
+# end
+##############################################
 function find_idop_plateaus_from_idop(
     df::DataFrame;
     delta_idop_thresh::Float64 = 1e-4,   # max allowed |ΔIDOP| between consecutive samples inside a flat region
@@ -388,8 +577,8 @@ function find_idop_plateaus_from_idop(
 )
     """
     Detect IDOP plateaus by scanning idop (Vector{Float64}) vs mu_values (Vector{Float64}).
-    Returns Vector{Vector{Float64}} aligned with filtered rows where each inner vector
-    contains plateau y-values (mean IDOP over the flat region).
+    Returns Vector{Vector{NamedTuple}} aligned with filtered rows where each inner vector
+    contains plateau info: (plateau=mean IDOP, mu_low=min mu, mu_high=max mu) over the flat region.
 
     Plateaus are contiguous runs where abs(diff(idop)) <= delta_idop_thresh.
     A run is reported if either:
@@ -401,14 +590,14 @@ function find_idop_plateaus_from_idop(
         error("No results match the specified fixed values.")
     end
 
-    plateau_idop = Vector{Vector{Float64}}(undef, nrow(filtered_df))
+    plateau_idop = Vector{Vector{NamedTuple}}(undef, nrow(filtered_df))
 
     for (i, row) in enumerate(eachrow(filtered_df))
         mu_vals = get(row, :mu_values, nothing)
         idop = get(row, :idop, nothing)
 
         if mu_vals === nothing || idop === nothing || length(mu_vals) != length(idop) || length(idop) < 2
-            plateau_idop[i] = Float64[]   # not enough data or missing
+            plateau_idop[i] = NamedTuple[]   # not enough data or missing
             continue
         end
 
@@ -417,7 +606,7 @@ function find_idop_plateaus_from_idop(
         # boolean mask where consecutive points are "flat"
         flat_mask = diffs .<= delta_idop_thresh
 
-        plateaus = Float64[]
+        plateaus = NamedTuple[]
         k = 1
         while k <= length(flat_mask)
             if !flat_mask[k]
@@ -437,8 +626,8 @@ function find_idop_plateaus_from_idop(
             mu_span = mu_vals[idx_b] - mu_vals[idx_a]   # span between first and last mu in plateau
 
             if (min_mu_span > 0.0 && mu_span >= min_mu_span) || (n_points >= min_samples)
-                # report plateau y-value as mean (robust to small residual noise)
-                push!(plateaus, mean(idop[idx_a:idx_b]))
+                # report plateau info
+                push!(plateaus, (plateau=mean(idop[idx_a:idx_b]), mu_low=mu_vals[idx_a], mu_high=mu_vals[idx_b]))
             end
 
             k = run_end + 1
@@ -468,22 +657,22 @@ function compute_idop_plateaus_all!(
 end
 
 function filter_idop_plateaus_at_1!(df::DataFrame; atol::Float64=1e-6)
-    """
-    Filter out plateaus in :plateaus column that are approximately equal to 1.0.
-    Assumes :plateaus is a Vector{Vector{Float64}} where each inner vector contains plateau IDOP values.
-    Modifies df in-place.
-    """
-    # if !(:plateaus in names(df))
-    #     error(":plateaus column not found in DataFrame")
-    # end
-    
     for row in eachrow(df)
         plateaus = row.plateaus
         # Filter out values close to 1.0
-        filtered_plateaus = filter(p -> !isapprox(p, 1.0; atol=atol), plateaus)
+        filtered_plateaus = filter(p -> !isapprox(p.plateau, 1.0; atol=atol), plateaus)
         row.plateaus = filtered_plateaus
     end
-    
+    return df
+end
+
+function filter_idop_plateaus_at_0!(df::DataFrame; atol::Float64=1e-6)
+    for row in eachrow(df)
+        plateaus = row.plateaus
+        # Filter out values close to 0.0
+        filtered_plateaus = filter(p -> !isapprox(p.plateau, 0.0; atol=atol), plateaus)
+        row.plateaus = filtered_plateaus
+    end
     return df
 end
 
@@ -500,7 +689,6 @@ function compute_gap_labels_qlim!(df::DataFrame; p_range::Vector{Int}=collect(-5
         
         label_list = NamedTuple[]
         for plateau in plateaus
-            adjusted_plateau = plateau + 0.5
             best_err = Inf
             best_p = 0
             best_q = 0
@@ -513,7 +701,7 @@ function compute_gap_labels_qlim!(df::DataFrame; p_range::Vector{Int}=collect(-5
                     else
                         val = p_try + q_try * phi
                     end
-                    err = abs(adjusted_plateau - val)
+                    err = abs(plateau - val)
                     if err < best_err
                         best_err = err
                         best_p = p_try
@@ -522,7 +710,7 @@ function compute_gap_labels_qlim!(df::DataFrame; p_range::Vector{Int}=collect(-5
                 end
             end
             
-            push!(label_list, (plateau=adjusted_plateau, p=best_p, q=best_q, err=best_err))
+            push!(label_list, (plateau=plateau, p=best_p, q=best_q, err=best_err))
         end
         gap_labels[i] = label_list
     end
@@ -530,3 +718,123 @@ function compute_gap_labels_qlim!(df::DataFrame; p_range::Vector{Int}=collect(-5
     df[!, :gap_labels] .= gap_labels
     return df
 end
+
+function compute_gap_labels_qlim_new!(df::DataFrame; p_range::Vector{Int}=[0,1], q_max::Int=5)
+    gap_labels = Vector{Vector{NamedTuple}}(undef, nrow(df))
+
+    for (i, row) in enumerate(eachrow(df))
+        plateaus = row.plateaus  # Vector of NamedTuple (plateau, mu_low, mu_high) from compute_idop_plateaus_all!
+        phi = row.phi            # Float64 parameter for rational approximation
+
+        label_list = NamedTuple[]
+        for gap in plateaus
+            plateau = gap.plateau
+            mu_low = gap.mu_low
+            mu_high = gap.mu_high
+            best_err = Inf
+            best_p = 0
+            best_q = 0
+
+            factor = phi
+
+            # Guard against phi ≈ 0 to avoid division by zero and Inf errors
+            if !isfinite(phi) || abs(phi) < eps(Float64)
+                push!(label_list, (E_low=mu_low, E_high=mu_high, N_gap=plateau, p=missing, q=missing, err=missing))
+                continue
+            end
+
+            for p_try in p_range
+                q_candidate = round(Int, (plateau - p_try) / factor)
+
+                # enforce q_max cutoff
+                if abs(q_candidate) > q_max
+                    continue
+                end
+
+                val = p_try + q_candidate * factor
+                err = abs(plateau - val)
+
+                if err < best_err
+                    best_err = err
+                    best_p = p_try
+                    best_q = q_candidate
+                end
+            end
+
+            push!(label_list, (E_low=mu_low, E_high=mu_high,
+                               N_gap=plateau, p=best_p, q=best_q,
+                               err=best_err))
+        end
+
+        gap_labels[i] = label_list
+    end
+
+    df.gap_labels = gap_labels
+    return df
+end
+
+
+
+
+
+############################################
+########### Phason Processing ##############
+############################################
+
+## currently not working as expected
+function process_gap_eigenvalues(df_slice::DataFrame)
+    """
+    Process df_slice to compute gap eigenvalues (closest to zero in gaps where disc_mp == 0).
+    Adds :gap_pos_eigs and :gap_neg_eigs columns.
+    Assumes df_slice has :min_pos_eigs, :min_neg_eigs, and :mu_mp (to detect gaps).
+    """
+    # if !(:min_pos_eigs in names(df_slice)) || !(:min_neg_eigs in names(df_slice)) || !(:mu_mp in names(df_slice))
+    #     @warn "df_slice missing required columns. Skipping gap processing."
+    #     return df_slice
+    # end
+
+    println("DataFrame keynames: ", names(df_slice))
+
+    gap_pos_eigs_all = []
+    gap_neg_eigs_all = []
+
+    for row in eachrow(df_slice)
+        min_pos_eigs = getproperty(row, :min_pos_eigs)
+        min_neg_eigs = getproperty(row, :min_neg_eigs)
+        mu_mp_vec = getproperty(row, :mu_mp)
+        mu_range = getproperty(row, :mu_range)
+
+        gap_pos_eigs = []
+        gap_neg_eigs = []
+
+        for (i, mu) in enumerate(mu_range)
+            is_gap = !(mu in mu_mp_vec)
+            if is_gap
+                # Closest to zero is the one with smaller abs between min_pos and min_neg
+                pos_abs = abs(min_pos_eigs[i])
+                neg_abs = abs(min_neg_eigs[i])
+                if pos_abs < neg_abs
+                    push!(gap_pos_eigs, min_pos_eigs[i])
+                    push!(gap_neg_eigs, missing)
+                else
+                    push!(gap_pos_eigs, missing)
+                    push!(gap_neg_eigs, min_neg_eigs[i])
+                end
+            else
+                push!(gap_pos_eigs, missing)
+                push!(gap_neg_eigs, missing)
+            end
+        end
+
+        push!(gap_pos_eigs_all, gap_pos_eigs)
+        push!(gap_neg_eigs_all, gap_neg_eigs)
+    end
+
+    df_slice[!, :gap_pos_eigs] = gap_pos_eigs_all
+    df_slice[!, :gap_neg_eigs] = gap_neg_eigs_all
+
+    return df_slice
+end
+
+
+end # module IDOPProcessing

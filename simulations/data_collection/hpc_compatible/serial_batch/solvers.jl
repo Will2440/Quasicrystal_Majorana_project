@@ -50,7 +50,7 @@ using LinearAlgebra
 using Base.Threads
 using DataFrames
 using BSON: @save, @load
-using ProgressMeter
+# using ProgressMeter
 
 
 struct UserOptions
@@ -325,7 +325,7 @@ function hp_generic_solver(
     thread_local_chunks = Dict(Threads.threadid() => 1)
 
     # Iterate over parameter combinations in parallel
-    @showprogress Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
+    Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
         thread_id = Threads.threadid()
 
         # Initialize thread-local storage for this thread (if not already initialized)
@@ -468,7 +468,7 @@ function np_generic_solver(
     ) for _ in 1:maxid]
     thread_local_chunks = ones(Int, maxid)
 
-    @showprogress Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
+    Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
         tid = Threads.threadid()
         results_df = thread_local_results[tid]
         chunk_idx = thread_local_chunks[tid]
@@ -579,7 +579,7 @@ function np_seq_scaled_solver(
     ))
     thread_local_chunks = Dict(Threads.threadid() => 1)
 
-    @showprogress Threads.@threads for idx in CartesianIndices((length(N_range), length(mu_range), length(Delta_range), length(sequences)))
+    Threads.@threads for idx in CartesianIndices((length(N_range), length(mu_range), length(Delta_range), length(sequences)))
         thread_id = Threads.threadid()
         if !haskey(thread_local_results, thread_id)
             thread_local_results[thread_id] = DataFrame(
@@ -741,7 +741,7 @@ function np_mu_rho_restricted_solver(
     thread_local_chunks = Dict(Threads.threadid() => 1)
 
     # Iterate over parameter combinations in parallel
-    @showprogress Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
+    Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
         thread_id = Threads.threadid()
 
         # Initialize thread-local storage for this thread (if not already initialized)
@@ -914,7 +914,7 @@ function hp_mu_rho_restricted_solver(
     thread_local_chunks = Dict(Threads.threadid() => 1)
 
     # Iterate over parameter combinations in parallel
-    @showprogress Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
+    Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
         thread_id = Threads.threadid()
 
         # Initialize thread-local storage for this thread (if not already initialized)

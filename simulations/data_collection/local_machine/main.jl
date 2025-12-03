@@ -67,18 +67,18 @@ thue_morse_sequence = SeqGen.thue_morse_SeqGen(N_seq_seed)
 plastic_sequence = SeqGen.plastic_SeqGen(N_seq_seed)
 
 ## Recover Sturmian sequences from .bson
-slope_file = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N1000_phason_0.0-1-0.0.bson"
-indir = joinpath(project_root, "..", "auxilliary", "sturm_seq_sets", slope_file)
+seq_file = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N1000_phason_0.0-1-0.0_algorithmic_generalised.bson"
+indir = joinpath(project_root, "..", "auxilliary", "sturm_seq_sets", seq_file)
 indir = normpath(indir)
 sturm_df = SeqGen.load_sturmian_seq_bson(indir)
 
 ## N Range (even single value must be a Vector type)
-N_range = [100]
+N_range = [200]
 
 ## t_n Range (combine any number of different hopping ranges)
 t1_range = collect(range(1.0, 1.0, 1))
 t2_range = collect(range(1.5, 1.5, 1))
-t3_range = [0.001, 0.01, 0.1, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0, 4.0, 5.0, 7.5, 10.0, 100.0] #[2.0, 3.0, 4.0]
+t3_range = [2.0, 3.0, 4.0]
 t_ranges = [t1_range, t2_range]#, t3_range]
 t_combinations = ParamCombGen.t_ranges_combs(t_ranges)
 
@@ -86,7 +86,7 @@ t_combinations = ParamCombGen.t_ranges_combs(t_ranges)
 mu_range = [0.0]#, 1.0, 2.0, 3.0] #collect(range(0.0, 3.0, length=151))
 
 ## Delta Range (even single value must be a vector type)
-Delta_range = [0.0]#, 0.5, 1.0] #collect(range(0.1, 2.0, 20))
+Delta_range = [0.0]#, 0.1, 0.2] #collect(range(0.1, 2.0, 20))
 
 
 ## Sequence Chunking (use this to generate sequence samples which can be compared)
@@ -104,7 +104,7 @@ Delta_range = [0.0]#, 0.5, 1.0] #collect(range(0.1, 2.0, 20))
 
 raw_seqs = collect(sturm_df.seq)
 sequences = [Vector{Int}(s) for s in raw_seqs]
-sequence_name = String(slope_file[1:end-5])  # remove .bson
+sequence_name = String(seq_file[1:end-5])  # remove .bson
 # raw_seq_ids = collect(sturm_df.phi)
 # sequence_ids = [Float64(id) for id in raw_seq_ids]
 phis = collect(sturm_df.phi)
@@ -125,13 +125,13 @@ chunk_size = 1000
 ################## Sec 2: Data Save Path ##################
 ###########################################################
 
-project_name = "sturmian_sweep_t1-t2_swap"
+project_name = "sturm_range_full" #"sturmian_sweep_t1-t2_const_mapping"
 
 root_path = joinpath(project_root, "../../../simulations/raw_data")
 if length(t_ranges) < 3
-    folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+    folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range)))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
 else
-    folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_t3($(t3_range[1])-$(t3_range[end])-$(length(t3_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+    folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range)))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_t3($(t3_range[1])-$(t3_range[end])-$(length(t3_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
 end
 datasave_path = "$(root_path)/$(folder_name)/"
 
