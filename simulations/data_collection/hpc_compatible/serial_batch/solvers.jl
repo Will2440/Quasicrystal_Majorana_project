@@ -45,12 +45,9 @@ export hp_generic_solver, np_generic_solver, np_mu_rho_restricted_solver, np_seq
 
 using GenericLinearAlgebra
 using LinearAlgebra
-# using Arpack
-# using SparseArrays
 using Base.Threads
 using DataFrames
 using BSON: @save, @load
-# using ProgressMeter
 
 
 struct UserOptions
@@ -294,7 +291,8 @@ function hp_generic_solver(
     precision::Int,
     chunk_size::Int,
     filepath::String,
-    opts::UserOptions
+    opts::UserOptions,
+    row_index::Union{Int,Nothing}
 )
     """
     Notes:
@@ -448,7 +446,8 @@ function np_generic_solver(
     sequence_ids::Vector{Tuple{Float64,Float64}},
     chunk_size::Int,
     filepath::String,
-    opts::UserOptions
+    opts::UserOptions,
+    row_index::Union{Int,Nothing}
 )
     # allocate by maxthreadid (not nthreads) to cover all possible thread ids
     maxid = Threads.maxthreadid()
@@ -528,7 +527,7 @@ function np_generic_solver(
         ))
 
         if nrow(results_df) >= chunk_size
-            file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
             @save file_name results_df
             empty!(results_df)
             thread_local_chunks[tid] = chunk_idx + 1
@@ -540,7 +539,7 @@ function np_generic_solver(
         results_df = thread_local_results[tid]
         if nrow(results_df) > 0
             chunk_idx = thread_local_chunks[tid]
-            file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
             @save file_name results_df
         end
     end
@@ -559,7 +558,8 @@ function np_seq_scaled_solver(
     sequence_ids::Vector{Tuple{Float64,Float64}},
     chunk_size::Int,
     filepath::String,
-    opts::UserOptions;
+    opts::UserOptions,
+    row_index::Union{Int,Nothing};
     preserve::Symbol = :rho        # :rho => scale both t1,t2; :t1 => keep t1=1.0 adjust t2
 )
     # Thread-local data store
@@ -709,7 +709,8 @@ function np_mu_rho_restricted_solver(
     sequence_ids::Vector{Tuple{Float64,Float64}},
     chunk_size::Int,
     filepath::String,
-    opts::UserOptions
+    opts::UserOptions,
+    row_index::Union{Int,Nothing}
 )
     """
         Notes:
@@ -884,7 +885,8 @@ function hp_mu_rho_restricted_solver(
     precision::Int,
     chunk_size::Int,
     filepath::String,
-    opts::UserOptions
+    opts::UserOptions,
+    row_index::Union{Int,Nothing}
 )
     """
         Notes:

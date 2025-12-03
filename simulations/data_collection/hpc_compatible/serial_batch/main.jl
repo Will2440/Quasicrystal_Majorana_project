@@ -40,10 +40,10 @@ project_root = @__DIR__
 ######################################################################################################################
 # # Leave this in if running main.jl directly from the terminal commandline 
 # # Comment this out and use __init__.jl if running in VSCode
-include(joinpath(project_root, "../../data_collection/hpc_compatible/serial_batch/solvers.jl"))
-include(joinpath(project_root, "../../data_collection/hpc_compatible/serial_batch/compute.jl"))
-include(joinpath(project_root, "../../data_collection/auxilliary/sequence_gen.jl"))
-include(joinpath(project_root, "../../data_collection/auxilliary/param_comb_gen.jl"))
+include(joinpath(project_root, "../../hpc_compatible/serial_batch/solvers.jl"))
+include(joinpath(project_root, "../../hpc_compatible/serial_batch/compute.jl"))
+include(joinpath(project_root, "../../auxilliary/sequence_gen.jl"))
+include(joinpath(project_root, "../../auxilliary/param_comb_gen.jl"))
 ######################################################################################################################
 
 using .SeqGen
@@ -60,7 +60,7 @@ row_index = parse(Int64, ARGS[1]);
 ################# Sec 1: Parameter Choice #################
 ###########################################################
 """
-    Read one parameter row from the latest param_prep .dat file
+    Read all parameter rows from the latest param_prep .dat file
     .dat columns (tab-separated):
     Ns::Vector{Int}
     mus::Vector{Float64}
@@ -72,35 +72,52 @@ row_index = parse(Int64, ARGS[1]);
     sequence_ids::Vector{Tuple{Float64,Float64}}
     sequences::Vector{Vector{Int}}
 """
-function read_parameters(params_path::String, row_index::Int)
+function read_parameters(params_path::String)
     raw = DelimitedFiles.readdlm(params_path, '\t', String; header=true)
-    row = raw[1][row_index, :]
+    data = raw[1]  # Matrix{String}
 
     # parse Julia literals safely (vectors/tuples)
     parse_lit(S::AbstractString) = Base.invokelatest(eval, Meta.parse(S))
 
-    Ns              = Vector{Int}(parse_lit(row[1]))
-    mus             = Vector{Float64}(parse_lit(row[2]))
-    Deltas          = Vector{Float64}(parse_lit(row[3]))
-    t1s             = Vector{Float64}(parse_lit(row[4]))
-    t2s             = Vector{Float64}(parse_lit(row[5]))
-    t3s             = Vector{Float64}(parse_lit(row[6]))
-    sequence_nms    = Vector{String}(parse_lit(row[7]))
-    seq_ids         = Vector{Tuple{Float64,Float64}}(parse_lit(row[8]))
-    seqs            = Vector{Vector{Int}}(parse_lit(row[9]))
+    params = []
+    for i in 1:size(data, 1)
+        row = data[i, :]
+        Ns              = Vector{Int}(parse_lit(row[1]))
+        mus             = Vector{Float64}(parse_lit(row[2]))
+        Deltas          = Vector{Float64}(parse_lit(row[3]))
+        t1s             = Vector{Float64}(parse_lit(row[4]))
+        t2s             = Vector{Float64}(parse_lit(row[5]))
+        t3s             = Vector{Float64}(parse_lit(row[6]))
+        sequence_nms    = Vector{String}(parse_lit(row[7]))
+        seq_ids         = Vector{Tuple{Float64,Float64}}(parse_lit(row[8]))
+        seqs            = Vector{Vector{Int}}(parse_lit(row[9]))
 
-    return (
-        Ns = Ns, mus = mus, Deltas = Deltas,
-        t1s = t1s, t2s = t2s, t3s = t3s,
-        sequence_names = sequence_nms, sequence_ids = seq_ids, sequences = seqs
-    )
+        push!(params, (
+            Ns = Ns, mus = mus, Deltas = Deltas,
+            t1s = t1s, t2s = t2s, t3s = t3s,
+            sequence_names = sequence_nms, sequence_ids = seq_ids, sequences = seqs
+        ))
+    end
+    return params
 end
 
 # Choose the .dat file and which row to run
-params_filename = "params_sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N1000_phason_0.0-1-0.0_Ns_500-500-1_mus_0-3-601_Deltas_0.0-0.2-5_t1_1-1-1_t2_1p5-2p5-3_t3_none_nseq_1.dat"
+params_filename = "params_sturmian_slopes_K100_L4_balanced_bins5000_mpb2_r50_comp-false_tailoption-0_N500_phason_0.0-1-0.0_const_mapping_Ns_500-500-1_mus_-3p0-3p0-601_Deltas_0.05-0.05-1_t1_1p0-1p0-1_t2_1p5-1p5-1_t3_none_mu601_delta1_t11_t21_t31_seq30.dat"
 params_dat_path = joinpath(project_root, "batch_params", "param_sets", params_filename)
 
-p = read_parameters(params_dat_path, row_index)
+
+
+# Read all parameters
+all_params = read_parameters(params_dat_path)
+p = all_params[row_index]
+
+# Compute global ranges
+global_Ns = unique(sort(vcat([param.Ns for param in all_params]...)))
+global_mus = unique(sort(vcat([param.mus for param in all_params]...)))
+global_Deltas = unique(sort(vcat([param.Deltas for param in all_params]...)))
+global_t1s = unique(sort(vcat([param.t1s for param in all_params]...)))
+global_t2s = unique(sort(vcat([param.t2s for param in all_params]...)))
+global_t3s = unique(sort(vcat([param.t3s for param in all_params]...)))
 
 # Map parsed params to variables used by run_selected_solver
 N_range = p.Ns
@@ -113,9 +130,9 @@ t3_range = p.t3s
 t_ranges = isempty(t3_range) ? [t1_range, t2_range] : [t1_range, t2_range, t3_range]
 t_combinations = ParamCombGen.t_ranges_combs(t_ranges)
 
-sequences = [p.sequence]             # Vector{Vector{Int}}
-sequence_ids = [p.sequence_id]          # Vector{Tuple{Float64,Float64}}
-sequence_name = p.sequence_name
+sequences = p.sequences             # Vector{Vector{Int}}
+sequence_ids = p.sequence_ids          # Vector{Tuple{Float64,Float64}}
+sequence_name = p.sequence_names[1]
 
 ## Set Precision for hp calculations
 BigFloat_precision = 512
@@ -139,7 +156,7 @@ ys = rho_range
 grad1 = ParamCombGen.angle_to_gradient(35.0)
 grad2 = ParamCombGen.angle_to_gradient(45.0)
 
-include(joinpath(project_root, "../../data_collection/auxilliary/param_restriction_cuts.jl"))
+include(joinpath(project_root, "../../auxilliary/param_restriction_cuts.jl"))
 # cuts = TMQC_D20_cuts # see auxilliary/param_restriction_cuts.jl for predefined cutting rules
 cuts = [
     Dict(
@@ -205,7 +222,7 @@ end
 # isdir(datasave_path) || mkpath(datasave_path)
 # println("Data will be saved to: $(datasave_path)")
 
-float3(x) = replace(@sprintf("%.6g", x), "." => "p")
+float3(x) = replace(string(x), "." => "p")
 
 function range_info(vec)
     isempty(vec) && return "none"
@@ -221,22 +238,22 @@ opts = get_user_options()
 precision_label = opts.calc_precision == :hp ? "hp" :
                   opts.calc_precision == :np ? "np" : "arpack"
 
-project_name = "sturmian_sweep_t1-t2_swap"
+project_name = "full_range"
 
 # Save under serial_batch/results/
 root_path = joinpath(project_root, "results", precision_label, project_name)
 
-n_info   = range_info(N_range)
-t1_info  = range_info(t1_range)
-t2_info  = range_info(t2_range)
-t3_info  = range_info(t3_range)
-mu_info  = range_info(mu_range)
-d_info   = range_info(Delta_range)
+n_info   = range_info(global_Ns)
+t1_info  = range_info(global_t1s)
+t2_info  = range_info(global_t2s)
+t3_info  = range_info(global_t3s)
+mu_info  = range_info(global_mus)
+d_info   = range_info(global_Deltas)
 
 if isempty(t3_range)
-    folder_name = "$(sequence_name)_N($n_info)_t1($t1_info)_t2($t2_info)_mu($mu_info)_Delta($d_info)"
+    folder_name = "$(sequence_name)_N($n_info)_t1($t1_info)_t2($t2_info)_mu($mu_info)_Delta($d_info)/"
 else
-    folder_name = "$(sequence_name)_N($n_info)_t1($t1_info)_t2($t2_info)_t3($t3_info)_mu($mu_info)_Delta($d_info)"
+    folder_name = "$(sequence_name)_N($n_info)_t1($t1_info)_t2($t2_info)_t3($t3_info)_mu($mu_info)_Delta($d_info)/"
 end
 
 datasave_path = normpath(joinpath(root_path, folder_name))
@@ -268,5 +285,6 @@ run_selected_solver(
     sequence_ids=sequence_ids,
     rho_target=rho_target,
     tbar=tbar,
-    preserve_symbol=preserve_symbol
+    preserve_symbol=preserve_symbol,
+    row_index=row_index
 )

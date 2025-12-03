@@ -29,7 +29,8 @@ function run_selected_solver(
     sequence_ids::Union{Nothing, Vector{Tuple{Float64,Float64}}}=nothing,
     rho_target::Float64=1.5,
     tbar::Float64=1.5,
-    preserve_symbol::Symbol=:t1
+    preserve_symbol::Symbol=:t1,
+    row_index::Union{Int,Nothing}=nothing
 )
 
     # helper: pick the first element for mu_loop and warn if multiple
@@ -43,9 +44,9 @@ function run_selected_solver(
 
     if opts.solver_type == :generic
         if opts.calc_precision == :np
-            HPCSolv.np_generic_solver(N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, sequence_ids, chunk_size, filepath, opts)
+            HPCSolv.np_generic_solver(N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, sequence_ids, chunk_size, filepath, opts, row_index)
         elseif opts.calc_precision == :hp
-            HPCSolv.hp_generic_solver(N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, sequence_ids, precision, chunk_size, filepath, opts)
+            HPCSolv.hp_generic_solver(N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, sequence_ids, precision, chunk_size, filepath, opts, row_index)
         elseif opts.calc_precision == :Arpack
             error("ARPACK-based generic solver not yet implemented.")
         else
@@ -72,9 +73,9 @@ function run_selected_solver(
         end
 
         if opts.calc_precision == :np
-            HPCSolv.np_mu_loop_solver(N, t_n, mu_range, Delta, seq, sequence_name, seq_id, chunk_size, filepath, opts)
+            HPCSolv.np_mu_loop_solver(N, t_n, mu_range, Delta, seq, sequence_name, seq_id, chunk_size, filepath, opts, row_index)
         elseif opts.calc_precision == :hp
-            HPCSolv.hp_mu_loop_solver(N, t_n, mu_range, Delta, seq, sequence_name, seq_id, precision, chunk_size, filepath, opts)
+            HPCSolv.hp_mu_loop_solver(N, t_n, mu_range, Delta, seq, sequence_name, seq_id, precision, chunk_size, filepath, opts, row_index)
         elseif opts.calc_precision == :Arpack
             error("ARPACK-based mu_loop solver not yet implemented.")
         else
@@ -85,7 +86,7 @@ function run_selected_solver(
         if opts.calc_precision == :np
             error(":N_loop solver for normal precision not yet implemented.")
         elseif opts.calc_precision == :hp
-            HPCSolv.hp_serial_solver_N_loop(N_range, t_n_range[1], mu_range, Delta_range[1], sequences[1], sequence_name, precision, filepath, opts)
+            HPCSolv.hp_serial_solver_N_loop(N_range, t_n_range[1], mu_range, Delta_range[1], sequences[1], sequence_name, precision, filepath, opts, row_index)
         elseif opts.calc_precision == :Arpack
             error("ARPACK-based N_loop solver not yet implemented.")
         else
@@ -100,14 +101,14 @@ function run_selected_solver(
         if param_restrictions === nothing
             error("param_restrictions must be provided for :restricted solver.")
         end
-        HPCSolv.np_mu_rho_restricted_solver(N_range, t_n_range, mu_range, param_restrictions, Delta_range, sequences, sequence_name, chunk_size, filepath, opts)
+        HPCSolv.np_mu_rho_restricted_solver(N_range, t_n_range, mu_range, param_restrictions, Delta_range, sequences, sequence_name, chunk_size, filepath, opts, row_index)
 
     elseif opts.solver_type == :seq_scaled
         if opts.calc_precision != :np
             println(":seq_scaled solver is only implemented for :np (got $(opts.calc_precision))")
             error("Unsupported precision for :seq_scaled: $(opts.calc_precision)")
         end
-        HPCSolv.np_seq_scaled_solver(N_range, rho_target, tbar, mu_range, Delta_range, sequences, sequence_name, sequence_ids, chunk_size, filepath, opts; preserve=preserve_symbol)
+        HPCSolv.np_seq_scaled_solver(N_range, rho_target, tbar, mu_range, Delta_range, sequences, sequence_name, sequence_ids, chunk_size, filepath, opts; preserve=preserve_symbol, row_index=row_index)
 
     else
         error("Unknown solver type: $(opts.solver_type)")
