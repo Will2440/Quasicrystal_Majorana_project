@@ -159,8 +159,8 @@ end
 ##############################################################################
 ## Usage 1: slopes and 1-slopes in interval [0,1] with consistent map_to=(2,1)
 ##############################################################################
-slope_file = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_tailoption-random.bson"
-N=1000
+slope_file = "sturmian_slopes_K100_L4_balanced_bins5000_mpb2_r50_comp-false_tailoption-0.bson"
+N=500
 map_to = (2,1) # (2,1) makes slope=0.0 1,1,1,1,... and slope=1.0 2,2,2,2,...
 
 indir = joinpath(@__DIR__, "sturm_grad_sets")
@@ -179,7 +179,7 @@ df_rats_and_irrats = vcat(
     cols = :union
 )
 
-phason_angle_range = [0.0] #collect(0.0:0.1:1.0)
+phason_angle_range = collect(0.0:0.01:1.0)
 
 seqs = Vector{Vector{Int}}()
 phis = Vector{Float64}()
@@ -312,3 +312,5 @@ println("Saved $(length(phis)) phis, $(length(seqs)) sequences to ", outfile)
 # @save outfile phis seqs phasons origins types
 # println("Saved $(length(phis)) phis with phason range $(phason_angle_range). Overall $(length(seqs)) sequences added to ", outfile)
 # ##############################################################################
+
+

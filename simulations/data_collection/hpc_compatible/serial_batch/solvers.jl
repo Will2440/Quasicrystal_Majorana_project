@@ -377,6 +377,12 @@ function hp_generic_solver(
             elseif opts.save_evals == :maj_np
                 mid = length(evals) ÷ 2
                 (Float64.(evals))[mid:mid+1]
+            elseif opts.save_evals == :half_hp
+                mid = length(evals) ÷ 2
+                evals[1:mid]
+            elseif opts.save_evals == :half_np
+                mid = length(evals) ÷ 2
+                Float64.(evals[1:mid])
             else
                 missing
             end
@@ -496,6 +502,9 @@ function np_generic_solver(
             elseif opts.save_evals == :maj_np
                 mid = length(evals) ÷ 2
                 evals[mid:mid+1]
+            elseif opts.save_evals == :half_np
+                mid = length(evals) ÷ 2
+                evals[1:mid]
             else
                 missing
             end
@@ -649,6 +658,9 @@ function np_seq_scaled_solver(
             elseif opts.save_evals == :maj_np
                 mid = length(evals) ÷ 2
                 evals[mid:mid+1]
+            elseif opts.save_evals == :half_np
+                mid = length(evals) ÷ 2
+                evals[1:mid]
             else
                 missing
             end
@@ -802,6 +814,9 @@ function np_mu_rho_restricted_solver(
                 elseif opts.save_evals == :maj_np
                     mid = length(evals) ÷ 2
                     evals[mid:mid+1]
+                elseif opts.save_evals == :half_np
+                    mid = length(evals) ÷ 2
+                    evals[1:mid]
                 else
                     missing
                 end
@@ -981,6 +996,12 @@ function hp_mu_rho_restricted_solver(
                 elseif opts.save_evals == :maj_np
                     mid = length(evals) ÷ 2
                     (Float64.(evals))[mid:mid+1]
+                elseif opts.save_evals == :half_hp
+                    mid = length(evals) ÷ 2
+                    evals[1:mid]
+                elseif opts.save_evals == :half_np
+                    mid = length(evals) ÷ 2
+                    Float64.(evals[1:mid])
                 else
                     missing
                 end
@@ -1103,6 +1124,9 @@ function np_mu_loop_solver(
             elseif opts.save_evals == :maj_np
                 mid = length(evals) ÷ 2
                 evals[mid:mid+1]
+            elseif opts.save_evals == :half_np
+                mid = length(evals) ÷ 2
+                evals[1:mid]
             else
                 missing
             end
@@ -1202,6 +1226,12 @@ function hp_mu_loop_solver(
             elseif opts.save_evals == :maj_np
                 mid = length(evals) ÷ 2
                 (Float64.(evals))[mid:mid+1]
+            elseif opts.save_evals == :half_hp
+                mid = length(evals) ÷ 2
+                evals[1:mid]
+            elseif opts.save_evals == :half_np
+                mid = length(evals) ÷ 2
+                Float64.(evals[1:mid])
             else
                 missing
             end

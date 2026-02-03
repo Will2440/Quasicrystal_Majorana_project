@@ -1,0 +1,60 @@
+# For SBATCH.sh
+## Suppress slurm.out files
+#SBATCH --output=/dev/null
+
+## Make threads available to BLAS
+export OPENBLAS_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+
+
+# For Command Line
+## Function to extract failed batch job IDs
+failed_unique() {
+  sacct -j "$1" --state=FAILED --format=JobID --noheader \
+    | sed 's/.*_//' \
+    | grep -o '[0-9]\+' \
+    | sort -nu \
+    | paste -sd, -
+}
+
+## Function to extract min, max and avg runstimes of all batch jobs in ID
+array_runtime_stats() {
+  local array_id="$1"
+
+  if [[ -z "$array_id" ]]; then
+    echo "Usage: array_runtime_stats <array_job_id>" >&2
+    return 1
+  fi
+
+  sacct -j "$array_id" \
+        --format=ElapsedRaw \
+        --state=COMPLETED,FAILED \
+        --noheader \
+    | awk '
+        function fmt(sec,  d,h,m,s) {
+          d = int(sec / 86400)
+          h = int((sec % 86400) / 3600)
+          m = int((sec % 3600) / 60)
+          s = sec % 60
+          return sprintf("%d-%02d:%02d:%02d", d, h, m, s)
+        }
+
+        NF {
+          sum += $1
+          count++
+          if (min == "" || $1 < min) min = $1
+          if ($1 > max) max = $1
+        }
+
+        END {
+          if (count == 0) {
+            print "No jobs found."
+            exit 1
+          }
+
+          printf "Jobs: %d\n", count
+          printf "Min runtime: %s\n", fmt(min)
+          printf "Max runtime: %s\n", fmt(max)
+          printf "Avg runtime: %s\n", fmt(int(sum / count))
+        }'
+}
