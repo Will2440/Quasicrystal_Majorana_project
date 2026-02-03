@@ -8,17 +8,30 @@ using Plots
 using DataFrames
 
 ## Sturmian slope sampling
-K = 8
-L = 3
+K = 100
+L = 4
+println("Generating Sturmian slopes with K=$K and L=$L.")
 
-tail_repeats = 50
-# sturmian_slopes_df = SeqGen.sample_sturmian_slopes(K, L; tail_repeats=tail_repeats, measure=true) # for standard tail repeats method
+# ## Standard tail repeats method (all 1's)
+# tail_length = 50
+# sturmian_slopes_df = SeqGen.sample_sturmian_slopes(K, L; tail_repeats=tail_length, measure=true) # for standard tail repeats method
 
-tail_option = "random" # "random" or <nothing> or a particular non-negative integer
-tail_length = 50
-sturmian_slopes_df = SeqGen.sample_sturmian_slopes_custom(K, L; tail_option=tail_option, tail_length=tail_length, measure=true) # for custom tail repeats behaviour
+# ## Custom tail option method
+# tail_option = 0 # "random" or <nothing> or a particular non-negative integer
+# tail_length = 50
+# sturmian_slopes_df = SeqGen.sample_sturmian_slopes_custom(K, L; tail_option=tail_option, tail_length=tail_length, measure=true) # for custom tail repeats behaviour
 
-println("Sampled $(length(sturmian_slopes_df.slope)) Sturmian slopes with K=$K, L=$L and tail_repeats=$tail_repeats.")
+## Option to use optimised balancing before sequence generation
+tail_option = 1 # "random" or <nothing> or a particular non-negative integer
+tail_length = 500
+balance_option = false
+bins = 1000
+max_per_bin = 1
+sturmian_slopes_df = SeqGen.sample_sturmian_slopes_custom_optBalance(K, L; tail_option=tail_option, tail_length=tail_length, measure=true, balanced=balance_option, bins=bins, max_per_bin=max_per_bin)
+
+
+println("Sampled $(length(sturmian_slopes_df.slope)) Sturmian slopes with K=$K, L=$L and tail_length=$tail_length.")
+println("Raw slope range: [$(minimum(sturmian_slopes_df.slope)), $(maximum(sturmian_slopes_df.slope))]")
 
 ## Add symmetric slopes (1 - phi)
 comp = false
@@ -33,11 +46,17 @@ if comp == true
     println("Appended $(length(symmetric_slopes)) complementary slopes; total slopes = $(nrow(sturmian_slopes_df))")
 end
 
-bins = 500
-max_per_bin = 1
-rng = MersenneTwister(42)
-balanced_sturm_df = SeqGen.rebalance_slopes(sturmian_slopes_df; bins=bins, max_per_bin=max_per_bin, rng=rng)
-println("Rebalanced to $(length(balanced_sturm_df.slope)) slopes after removing overdense areas.")
+post_balance_opt = true
+if post_balance_opt == true
+    # Rebalance again after adding complementary slopes
+    bins = 5000
+    max_per_bin = 2
+    rng = MersenneTwister(42)
+    balanced_sturm_df = SeqGen.rebalance_slopes(sturmian_slopes_df; bins=bins, max_per_bin=max_per_bin, rng=rng)
+    println("Rebalanced to $(length(balanced_sturm_df.slope)) slopes after adding complementary slopes.")
+    println("Balanced slope range: [$(minimum(balanced_sturm_df.slope)), $(maximum(balanced_sturm_df.slope))]")
+end
+
 
 ## Visualise
 function plt_sturmian_slope_sampling_bins(
@@ -112,25 +131,28 @@ end
 
 outdir = joinpath(@__DIR__, "sturm_grad_sets")
 
-plt_sturmian_slope_sampling_bins(
-    sturmian_slopes_df,
-    joinpath(outdir, "sturmian_slope_sampling_bins_K$(K)_L$(L)_r$(tail_repeats)_comp-$(comp).png");
-    K=K,
-    L=L
-)
+# plt_sturmian_slope_sampling_bins(
+#     sturmian_slopes_df,
+#     joinpath(outdir, "sturmian_slope_sampling_bins_K$(K)_L$(L)_r$(tail_length)_comp-$(comp).png");
+#     K=K,
+#     L=L
+# )
 
-plt_sturmian_slope_sampling_bins(
-    balanced_sturm_df,
-    joinpath(outdir, "balanced_sturmian_slope_sampling_bins_K$(K)_L$(L)_r$(tail_repeats)_comp-$(comp).png");
-    K=K,
-    L=L
-)
+# plt_sturmian_slope_sampling_bins(
+#     balanced_sturm_df,
+#     joinpath(outdir, "balanced_sturmian_slope_sampling_bins_K$(K)_L$(L)_r$(tail_length)_comp-$(comp).png");
+#     K=K,
+#     L=L
+# )
 
+# balanced_sturm_df = sturmian_slopes_df
 
 ## save to BSON file
-bal_name = "sturmian_slopes_K$(K)_L$(L)_balanced_bins$(bins)_mpb$(max_per_bin)_r$(tail_repeats)_comp-$(comp)_tailoption-$(tail_option).bson"
+t0 = time_ns()
+bal_name = "sturmian_slopes_K$(K)_L$(L)_balanced_bins$(bins)_mpb$(max_per_bin)_r$(tail_length)_comp-$(comp)_tailoption-$(tail_option).bson"
 @save joinpath(outdir, bal_name) balanced_sturm_df
-println("Saved balanced Sturmian slopes to $(joinpath(outdir, bal_name))")
-raw_name = "sturmian_slopes_K$(K)_L$(L)_r$(tail_repeats)_comp-$(comp)_tailoption-$(tail_option).bson"
-@save joinpath(outdir, raw_name) sturmian_slopes_df
-println("Saved raw Sturmian slopes to $(joinpath(outdir, raw_name))")
+println("Saved balanced Sturmian slopes (took $((time_ns() - t0)/1e9) s) to $(joinpath(outdir, bal_name))")
+# t0 = time_ns()
+# raw_name = "sturmian_slopes_K$(K)_L$(L)_r$(tail_length)_comp-$(comp)_tailoption-$(tail_option).bson"
+# @save joinpath(outdir, raw_name) sturmian_slopes_df
+# println("Saved raw Sturmian slopes (took $((time_ns() - t0)/1e9) s) to $(joinpath(outdir, raw_name))")

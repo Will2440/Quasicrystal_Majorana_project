@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="200" height="600" viewBox="0 0 800 2400">
+<defs>
+  <clipPath id="clip500">
+    <rect x="0" y="0" width="800" height="2400"/>
+  </clipPath>
+</defs>
+<path clip-path="url(#clip500)" d="M0 2400 L800 2400 L800 0 L0 0  Z" fill="#ffffff" fill-rule="evenodd" fill-opacity="1"/>
+<defs>
+  <clipPath id="clip501">
+    <rect x="480" y="239" width="800" height="1681"/>
+  </clipPath>
+</defs>
+<path clip-path="url(#clip500)" d="M31.4961 2368.5 L768.504 2368.5 L768.504 31.4961 L31.4961 31.4961  Z" fill="#ffffff" fill-rule="evenodd" fill-opacity="1"/>
+<defs>
+  <clipPath id="clip502">
+    <rect x="31" y="31" width="738" height="2338"/>
+  </clipPath>
+</defs>
+<polyline clip-path="url(#clip502)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:16; stroke-opacity:1; fill:none" points="215.748,1475.85 584.252,1475.85 "/>
+<circle clip-path="url(#clip502)" cx="400" cy="924.154" r="28.8" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="1816.81" r="28.8" fill="#0d0d0d" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="372.461" r="28.8" fill="#191919" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="1265.12" r="28.8" fill="#262626" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="2157.78" r="28.8" fill="#333333" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="713.426" r="28.8" fill="#404040" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="1606.08" r="28.8" fill="#4d4d4d" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="161.733" r="28.8" fill="#595959" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="1054.39" r="28.8" fill="#666666" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="1947.05" r="28.8" fill="#737373" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="502.698" r="28.8" fill="#808080" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="1395.36" r="28.8" fill="#8c8c8c" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="2288.01" r="28.8" fill="#999999" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="843.663" r="28.8" fill="#a6a6a6" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="1736.32" r="28.8" fill="#b3b3b3" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="291.97" r="28.8" fill="#bfbfbf" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="1184.63" r="28.8" fill="#cccccc" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="2077.29" r="28.8" fill="#d9d9d9" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="632.935" r="28.8" fill="#e6e6e6" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="1525.59" r="28.8" fill="#f2f2f2" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip502)" cx="400" cy="81.2422" r="28.8" fill="#ffffff" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+</svg>

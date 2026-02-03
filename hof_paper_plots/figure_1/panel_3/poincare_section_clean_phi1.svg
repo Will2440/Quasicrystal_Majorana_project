@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="600" height="200" viewBox="0 0 2400 800">
+<defs>
+  <clipPath id="clip680">
+    <rect x="0" y="0" width="2400" height="800"/>
+  </clipPath>
+</defs>
+<path clip-path="url(#clip680)" d="M0 800 L2400 800 L2400 4.44089e-14 L0 4.44089e-14  Z" fill="#ffffff" fill-rule="evenodd" fill-opacity="1"/>
+<defs>
+  <clipPath id="clip681">
+    <rect x="480" y="0" width="1681" height="800"/>
+  </clipPath>
+</defs>
+<path clip-path="url(#clip680)" d="M31.4961 768.504 L2368.5 768.504 L2368.5 31.4961 L31.4961 31.4961  Z" fill="#ffffff" fill-rule="evenodd" fill-opacity="1"/>
+<defs>
+  <clipPath id="clip682">
+    <rect x="31" y="31" width="2338" height="738"/>
+  </clipPath>
+</defs>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="-2305.51,472.493 4705.51,472.493 "/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="87.1391,327.507 198.425,562.1 "/>
+<circle clip-path="url(#clip682)" cx="87.1391" cy="327.507" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="198.425,562.1 309.711,182.52 "/>
+<circle clip-path="url(#clip682)" cx="198.425" cy="562.1" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="309.711,182.52 420.997,417.113 "/>
+<circle clip-path="url(#clip682)" cx="309.711" cy="182.52" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="420.997,417.113 532.283,651.707 "/>
+<circle clip-path="url(#clip682)" cx="420.997" cy="417.113" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="532.283,651.707 643.57,272.127 "/>
+<circle clip-path="url(#clip682)" cx="532.283" cy="651.707" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="643.57,272.127 754.856,506.72 "/>
+<circle clip-path="url(#clip682)" cx="643.57" cy="272.127" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="754.856,506.72 866.142,127.14 "/>
+<circle clip-path="url(#clip682)" cx="754.856" cy="506.72" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="866.142,127.14 977.428,361.733 "/>
+<circle clip-path="url(#clip682)" cx="866.142" cy="127.14" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="977.428,361.733 1088.71,596.327 "/>
+<circle clip-path="url(#clip682)" cx="977.428" cy="361.733" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="1088.71,596.327 1200,216.747 "/>
+<circle clip-path="url(#clip682)" cx="1088.71" cy="596.327" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="1200,216.747 1311.29,451.34 "/>
+<circle clip-path="url(#clip682)" cx="1200" cy="216.747" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="1311.29,451.34 1422.57,685.933 "/>
+<circle clip-path="url(#clip682)" cx="1311.29" cy="451.34" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="1422.57,685.933 1533.86,306.353 "/>
+<circle clip-path="url(#clip682)" cx="1422.57" cy="685.933" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="1533.86,306.353 1645.14,540.947 "/>
+<circle clip-path="url(#clip682)" cx="1533.86" cy="306.353" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="1645.14,540.947 1756.43,161.367 "/>
+<circle clip-path="url(#clip682)" cx="1645.14" cy="540.947" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="1756.43,161.367 1867.72,395.96 "/>
+<circle clip-path="url(#clip682)" cx="1756.43" cy="161.367" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="1867.72,395.96 1979,630.553 "/>
+<circle clip-path="url(#clip682)" cx="1867.72" cy="395.96" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="1979,630.553 2090.29,250.973 "/>
+<circle clip-path="url(#clip682)" cx="1979" cy="630.553" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="2090.29,250.973 2201.57,485.567 "/>
+<circle clip-path="url(#clip682)" cx="2090.29" cy="250.973" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<polyline clip-path="url(#clip682)" style="stroke:#000000; stroke-linecap:round; stroke-linejoin:round; stroke-width:8; stroke-opacity:1; fill:none" points="2201.57,485.567 2312.86,105.987 "/>
+<circle clip-path="url(#clip682)" cx="2201.57" cy="485.567" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+<circle clip-path="url(#clip682)" cx="2312.86" cy="105.987" r="18" fill="#000000" fill-rule="evenodd" fill-opacity="1" stroke="none"/>
+</svg>

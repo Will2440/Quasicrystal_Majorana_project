@@ -1,12 +1,10 @@
 module SeqGen
 
 using ProgressMeter
-using Random
+using Random: AbstractRNG, MersenneTwister, shuffle!
 using DataFrames
 using BSON
 
-
-export normal_SeqGen, golden_SeqGen, silver_SeqGen, thue_morse_SeqGen, cut_to_length, golden_LengthCalc, silver_LengthCalc, thue_morse_LengthCalc, plastic_LengthCalc, rebalance_slopes, sample_sturmian_slopes, load_sturmian_seq_bson, cf_prefix_to_slope_custom, sample_sturmian_slopes_custom
 
 function normal_SeqGen(N::Int)
     return fill(1, N)
@@ -249,7 +247,7 @@ end
 function enumerate_prefixes_stream(K::Int, L::Int; measure::Bool=false)
     t0 = time_ns()
     total = sum(K^k for k in 1:L)
-    println("Stage 1/2: Enumerating prefixes (total ≈ $total)")
+    println("Stage 1/2: Enumerating prefixes (total ≈ $total)...")
     prefixes = Channel{Vector{Int}}(Inf) do ch
         function build_prefix(prefix::Vector{Int}, depth::Int)
             if depth > L
@@ -269,10 +267,42 @@ function enumerate_prefixes_stream(K::Int, L::Int; measure::Bool=false)
     return prefixes
 end
 
+## bypasses use of channel and makes prefixes straight into vector (more efficicent)
+function enumerate_prefixes_stream_vector(K::Int, L::Int; measure::Bool=false)
+    t0 = time_ns()
+    total = sum(K^k for k in 1:L)
+    println("Stage 1/2: Enumerating prefixes (total ≈ $total)...")
+    
+    prefixes = Vector{Vector{Int}}()
+    sizehint!(prefixes, total)  # Pre-allocate for efficiency
+    
+    # Start with length-1 prefixes
+    current = [[a] for a in 1:K]
+    append!(prefixes, current)
+    
+    # Iteratively build longer prefixes
+    for depth in 2:L
+        new_current = Vector{Vector{Int}}()
+        for p in current
+            for a in 1:K
+                new_p = [p; a]
+                push!(new_current, new_p)
+                push!(prefixes, new_p)
+            end
+        end
+        current = new_current
+    end
+    
+    if measure
+        println("enumerate_prefixes_stream elapsed = $((time_ns() - t0)/1e9) s")
+    end
+    return prefixes
+end
+
 # Main function: sample dense set of Sturmian slopes
 function sample_sturmian_slopes(K::Int, L::Int; tail_repeats::Int=30, measure::Bool=false)
     t0 = time_ns()
-    prefixes_ch = enumerate_prefixes_stream(K, L; measure=true)  # no measure here to avoid double printing
+    prefixes_ch = enumerate_prefixes_stream(K, L; measure=true)
 
     # collect channel into a Vector so it is indexable/has length for threading
     prefixes = collect(prefixes_ch)
@@ -301,7 +331,7 @@ function sample_sturmian_slopes(K::Int, L::Int; tail_repeats::Int=30, measure::B
 end
 
 # Downsample slopes to rebalance distribution across [0,1]
-function rebalance_slopes(slopes_df::DataFrame; bins::Int=200, max_per_bin::Int=5, rng::AbstractRNG=Random.GLOBAL_RNG)
+function rebalance_slopes(slopes_df::DataFrame; bins::Int=200, max_per_bin::Int=5, rng::AbstractRNG=MersenneTwister(42))
     """
     Downsample a (possibly uneven) collection of Sturmian slopes to produce a more
     evenly distributed set across [0,1].
@@ -429,14 +459,14 @@ end
 # New function: sample Sturmian slopes with customizable tail options, outputting DataFrame like sample_sturmian_slopes
 function sample_sturmian_slopes_custom(K::Int, L::Int; tail_option::Union{Nothing, String, Int}=nothing, tail_length::Int=30, measure::Bool=false, rng::AbstractRNG=MersenneTwister(42))
     t0 = time_ns()
-    prefixes_ch = enumerate_prefixes_stream(K, L; measure=false)  # Reuse existing enumeration
+    prefixes_ch = enumerate_prefixes_stream(K, L; measure=true)
     
     # Collect channel into a Vector
     prefixes = collect(prefixes_ch)
     
     n = length(prefixes)
     if measure
-        println("Stage 2/2: Computing slopes for $n prefixes with custom tail...")
+        println("Stage 2/2: Computing slopes for $n prefixes with custom tail $tail_option...")
     end
     
     slopes = Vector{Float64}(undef, n)
@@ -452,6 +482,77 @@ function sample_sturmian_slopes_custom(K::Int, L::Int; tail_option::Union{Nothin
     # Sort by slope and return DataFrame
     order = sortperm(slopes)
     out = DataFrame(prefix = pref_out[order], slope = slopes[order])
+    if measure
+        println("sample_sturmian_slopes_custom elapsed = $((time_ns() - t0)/1e9) s")
+    end
+    return out
+end
+
+
+
+#################################
+####### Version which can balance slopes before genrated -- more efficicent ###########
+#################################
+
+# New function: sample Sturmian slopes with customizable tail options, outputting DataFrame like sample_sturmian_slopes
+function sample_sturmian_slopes_custom_optBalance(K::Int, L::Int; tail_option::Union{Nothing, String, Int}=nothing, tail_length::Int=30, measure::Bool=false, rng::AbstractRNG=MersenneTwister(42), balanced::Bool=false, bins::Int=200, max_per_bin::Int=5)
+    t0 = time_ns()
+    prefixes = enumerate_prefixes_stream_vector(K, L; measure=true)
+    
+    n = length(prefixes)
+    if measure
+        if balanced
+            println("Stage 2/2: Balancing slopes nd computing for up to $(bins*max_per_bin) prefixes with custom tail...")
+        else
+            println("Stage 2/2: Computing slopes for $n prefixes with custom tail...")
+        end
+    end
+    
+    if balanced
+        # Prepare bins
+        edges = collect(range(0.0, stop=1.0, length=bins+1))
+        bin_counts = Dict{Int, Int}()  # Track how many per bin
+        selected_prefixes = Vector{Vector{Int}}()
+        selected_slopes = Vector{Float64}()
+        bin_lock = ReentrantLock()  # Declare the lock for thread safety
+        
+        Threads.@threads for p in prefixes
+            s = cf_prefix_to_slope_custom(p; tail_option=tail_option, tail_length=tail_length, rng=rng)
+            s_clamped = clamp(s, 0.0, 1.0)
+            bin_idx = min(searchsortedlast(edges, s_clamped), bins)
+            
+            lock(bin_lock)
+            try
+                if get(bin_counts, bin_idx, 0) < max_per_bin
+                    push!(selected_prefixes, p)
+                    push!(selected_slopes, s)
+                    bin_counts[bin_idx] = get(bin_counts, bin_idx, 0) + 1
+                end
+            finally
+                unlock(bin_lock)
+            end
+        end
+        
+        # Sort by slope
+        order = sortperm(selected_slopes)
+        out = DataFrame(prefix = selected_prefixes[order], slope = selected_slopes[order])
+    else
+        # Original method: compute all slopes in parallel
+        slopes = Vector{Float64}(undef, n)
+        pref_out = Vector{Vector{Int}}(undef, n)
+        
+        Threads.@threads for i in 1:n
+            p = prefixes[i]
+            s = cf_prefix_to_slope_custom(p; tail_option=tail_option, tail_length=tail_length, rng=rng)
+            slopes[i] = s
+            pref_out[i] = p
+        end
+        
+        # Sort by slope and return DataFrame
+        order = sortperm(slopes)
+        out = DataFrame(prefix = pref_out[order], slope = slopes[order])
+    end
+    
     if measure
         println("sample_sturmian_slopes_custom elapsed = $((time_ns() - t0)/1e9) s")
     end

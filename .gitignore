@@ -1,11 +1,20 @@
 plots_masters_thesis/
 final_data_masters_thesis/
 # *.json
+<<<<<<< HEAD
 # *.png
 *.bson
 *.dat
 *.gif
 *.log
 *.out
+=======
+*.png
+*.bson
+# *.gif
+# *.log
+>>>>>>> 92a7402421699e609ccc75c045b402a88506e856
 raw_data/
 results/
+*.csv
+*.dat

@@ -146,6 +146,8 @@ elseif sequence_selection == :user_range
     seq_sel_info = "_r$(sequence_indices[1])-$(sequence_indices[end])"
 elseif sequence_selection == :target_slope
     seq_sel_info = "_s$(target_slope)_t$(slope_tolerance)"
+elseif sequence_selection == :slope_range
+    seq_sel_info = "_srange$(target_slope_range[1])-$(target_slope_range[2])"
 elseif sequence_selection == :target_phason
     seq_sel_info = "_p$(target_phason)_t$(phason_tolerance)"
 else
@@ -197,13 +199,18 @@ elseif sequence_selection == :target_slope
     seqs = seqs[mask]
     phis = phis[mask]
     phasons = phasons[mask]
+elseif sequence_selection == :slope_range
+    mask = (phis .>= target_slope_range[1]) .& (phis .<= target_slope_range[2])
+    seqs = seqs[mask]
+    phis = phis[mask]
+    phasons = phasons[mask]
 elseif sequence_selection == :target_phason
     mask = abs.(phasons .- target_phason) .<= phason_tolerance
     seqs = seqs[mask]
     phis = phis[mask]
     phasons = phasons[mask]
 elseif sequence_selection != :all
-    error("Unknown sequence_selection: $sequence_selection. Use :all, :user_range, :target_slope, or :target_phason")
+    error("Unknown sequence_selection: $sequence_selection. Use :all, :user_range, :target_slope, :slope_range, or :target_phason")
 end
 
 # =====================================================================
@@ -525,6 +532,8 @@ if sequence_selection == :user_range
     println("Using filtering: $(sequence_selection) with indices: $(sequence_indices)")
 elseif sequence_selection == :target_slope
     println("Using filtering: $(sequence_selection) with target slope: $(target_slope) ± $(slope_tolerance)")
+elseif sequence_selection == :slope_range
+    println("Using filtering: $(sequence_selection) with range: [$(target_slope_range[1]), $(target_slope_range[2])]")
 elseif sequence_selection == :target_phason
     println("Using filtering: $(sequence_selection) with target phason: $(target_phason) ± $(phason_tolerance)")
 elseif sequence_selection == :all

@@ -276,6 +276,59 @@ function np_mbs_gap_size(
     return gap_size::Float64
 end
 
+function np_flattened_Q(
+    evals::Vector{Float64}, 
+    evecs::Matrix{Float64};
+    eps::Float64 = 1e-8
+)
+
+    s = similar(evals)
+    @inbounds for i in eachindex(evals)
+        if evals[i] > eps
+            s[i] = 1.0
+        elseif evals[i] < -eps
+            s[i] = -1.0
+        else
+            # exact zero modes → assign consistently
+            s[i] = 0.0
+        end
+    end
+
+    S = Diagonal(s)
+    return evecs * S * evecs'
+end
+
+mutable struct ProjectorWindingAccumulator
+    Q_prev::Union{Matrix{Float64}, Nothing}
+    phase_sum::Float64
+end
+
+function ProjectorWindingAccumulator()
+    ProjectorWindingAccumulator(nothing, 0.0)
+end
+
+function np_calc_projector_winding!(
+    acc::ProjectorWindingAccumulator,
+    evals::Vector{Float64},
+    evecs::Matrix{Float64}
+)
+    Q = np_flattened_Q(evals, evecs)
+
+    if acc.Q_prev !== nothing
+        U = acc.Q_prev * Q
+        acc.phase_sum += angle(det(U))
+    end
+
+    acc.Q_prev = Q
+    return nothing
+end
+
+function finalize_projector_winding(acc::ProjectorWindingAccumulator)
+    return round(Int, acc.phase_sum / (2π))
+end
+
+
+
 ###########################################################
 ################ Sec 3: Solving Functions #################
 ###########################################################
@@ -1278,6 +1331,135 @@ function hp_mu_loop_solver(
     if nrow(results_df) > 0
         file_name = "$(filepath)_mu_loop_hp_chunk_$(chunk_idx).bson"
         @save file_name results_df
+    end
+
+    return nothing
+end
+
+function np_phason_loop_solver(
+    N_range::Vector{Int},
+    t_n_range::Vector{Vector{Float64}},
+    mu_range::Vector{Float64},
+    Delta_range::Vector{Float64},
+    sequences::Vector{Vector{Int}},
+    sequence_name::String,
+    sequence_ids::Vector{Tuple{Float64,Float64}},
+    chunk_size::Int,
+    filepath::String,
+    opts::UserOptions,
+    row_index::Union{Int,Nothing}
+)
+    # allocate by maxthreadid (not nthreads) to cover all possible thread ids
+    maxid = Threads.maxthreadid()
+    thread_local_results = [DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        sequence_id = Tuple{Float64,Float64}[],
+        mp = Float64[],
+        maj_gap = Float64[],
+        ipr = Float64[],
+        loc_len = Float64[],
+        eigenvalues = Union{Vector{Float64}, Missing}[],
+        eigenvectors = Union{Matrix{Float64}, Missing}[],
+        winding_phase = Union{Float64, Missing}[]
+    ) for _ in 1:maxid]
+    thread_local_chunks = ones(Int, maxid)
+
+    # Thread over parameters only; loop over sequences internally
+    Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range)))
+        tid = Threads.threadid()
+        results_df = thread_local_results[tid]
+        
+        # Extract parameters
+        N = N_range[idx[1]]
+        t_n = t_n_range[idx[2]]
+        mu = mu_range[idx[3]]
+        Delta = Delta_range[idx[4]]
+
+        # Initialize accumulator for this specific parameter set (phason cycle)
+        # Only needed if calc_proj_wind is true
+        winding_acc = opts.calc_proj_wind ? ProjectorWindingAccumulator() : nothing
+
+        # Inner loop over all sequences for these specific parameters
+        # Designed for sequence groups with fixed slope and full period of phason
+        for (seq_idx, sequence) in enumerate(sequences)
+            sequence_id = sequence_ids[seq_idx]
+            chunk_idx = thread_local_chunks[tid]
+
+            # Solve
+            truncated_sequence = Vector(sequence[1:N])
+            BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
+            evals, evecs = LinearAlgebra.eigen(Hermitian(BdG))
+
+            mp = opts.calc_mp ? np_calc_maj_mp(evecs) : NaN
+            gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
+            ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
+            loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+
+            current_winding = missing
+            if opts.calc_proj_wind
+                np_calc_projector_winding!(winding_acc, evals, evecs)
+                current_winding = winding_acc.phase_sum
+            end
+
+            # Save
+            eigenvalues_to_save = begin
+                if opts.save_evals == :all_np
+                    evals
+                elseif opts.save_evals == :maj_np
+                    mid = length(evals) ÷ 2
+                    evals[mid:mid+1]
+                else
+                    missing
+                end
+            end
+            eigenvectors_to_save = begin
+                if opts.save_evecs == :all_np
+                    evecs
+                elseif opts.save_evecs == :maj_np
+                    mid = size(evecs, 2) ÷ 2
+                    evecs[:, mid:mid+1]
+                else
+                    missing
+                end
+            end
+
+            push!(results_df, (
+                N = N,
+                t_n = t_n,
+                mu = mu,
+                Delta = Delta,
+                sequence_name = sequence_name,
+                sequence_id = sequence_id,
+                mp = mp,
+                maj_gap = gap,
+                ipr = ipr,
+                loc_len = loc_len,
+                eigenvalues = eigenvalues_to_save,
+                eigenvectors = eigenvectors_to_save,
+                winding_phase = current_winding
+            ))
+
+            if nrow(results_df) >= chunk_size
+                file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+                @save file_name results_df
+                empty!(results_df)
+                thread_local_chunks[tid] = chunk_idx + 1
+            end
+        end
+    end
+
+    # Flush remaining per-thread results
+    for tid in 1:maxid
+        results_df = thread_local_results[tid]
+        if nrow(results_df) > 0
+            chunk_idx = thread_local_chunks[tid]
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            @save file_name results_df
+        end
     end
 
     return nothing

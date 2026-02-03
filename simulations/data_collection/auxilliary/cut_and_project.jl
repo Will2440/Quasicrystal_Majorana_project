@@ -1,6 +1,16 @@
 using BSON: @save, @load
 using BSON
 using DataFrames
+using Base.Threads: @threads, nthreads, threadid, SpinLock
+using ProgressMeter
+using Plots
+using StatsBase
+
+const THREAD_SLOTS = try
+    Threads.maxthreads()
+catch
+    Threads.nthreads()
+end
 
 function load_sturmian_grad_bson(path::AbstractString)
     @assert isfile(path) "BSON file not found: $path"
@@ -69,7 +79,7 @@ function generate_full_slope_df(orig_df::DataFrame; n_rationals::Int=10, start_r
     # 1. Add rationals
     rats, _ = add_rationals(n_rationals; start_r=start_r)
     rat_df = DataFrame(slope=rats, origin="rational", type="original", prefix=fill(missing, length(rats)))
-    rat_df = add_extrema!(rat_df)
+    # rat_df = add_extrema!(rat_df)
     # Mark extrema
     extrema_slopes = [0.0, 1.0]
     extrema_df = DataFrame(slope=extrema_slopes, origin="extrema", type="original", prefix=fill(missing, length(extrema_slopes)))
@@ -92,21 +102,21 @@ function generate_full_slope_df(orig_df::DataFrame; n_rationals::Int=10, start_r
     rec_df.slope .= [s == 0.0 ? NaN : 1.0/s for s in base_df.slope]
     rec_df.type .= "reciprocal"
 
-    # 6. Negatives (for π/2 to π)
-    neg_base_df = deepcopy(base_df)
-    neg_base_df.slope .= -base_df.slope
-    neg_base_df.type .= "negative_original"
+    # # 6. Negatives (for π/2 to π)
+    # neg_base_df = deepcopy(base_df)
+    # neg_base_df.slope .= -base_df.slope
+    # neg_base_df.type .= "negative_original"
 
-    neg_comp_df = deepcopy(comp_df)
-    neg_comp_df.slope .= -comp_df.slope
-    neg_comp_df.type .= "negative_complementary"
+    # neg_comp_df = deepcopy(comp_df)
+    # neg_comp_df.slope .= -comp_df.slope
+    # neg_comp_df.type .= "negative_complementary"
 
-    neg_rec_df = deepcopy(rec_df)
-    neg_rec_df.slope .= -rec_df.slope
-    neg_rec_df.type .= "negative_reciprocal"
+    # neg_rec_df = deepcopy(rec_df)
+    # neg_rec_df.slope .= -rec_df.slope
+    # neg_rec_df.type .= "negative_reciprocal"
 
     # 7. Combine all, remove duplicates, sort
-    all_df = vcat(base_df, comp_df, rec_df, neg_base_df, neg_comp_df, neg_rec_df)
+    all_df = vcat(base_df, comp_df, rec_df)#, neg_base_df, neg_comp_df, neg_rec_df)
     # Remove duplicates by slope and type
     all_df = unique(all_df, [:slope, :type])
     # Remove NaN slopes (from reciprocal of zero)
@@ -156,54 +166,129 @@ function generalised_cut_and_project_sequence(N::Int, alpha::Float64; gamma::Flo
     return seq
 end
 
-##############################################################################
-## Usage 1: slopes and 1-slopes in interval [0,1] with consistent map_to=(2,1)
-##############################################################################
-slope_file = "sturmian_slopes_K100_L4_balanced_bins5000_mpb2_r50_comp-false_tailoption-0.bson"
-N=500
-map_to = (2,1) # (2,1) makes slope=0.0 1,1,1,1,... and slope=1.0 2,2,2,2,...
-
-indir = joinpath(@__DIR__, "sturm_grad_sets")
-infile = joinpath(indir, slope_file)
-println("Loading Sturmian slopes from ", infile)
-sturmian_slopes_df = load_sturmian_grad_bson(infile)
-
-rats, _ = add_rationals(10; start_r=2)
-rats_df = DataFrame(slope=rats, origin="rational", type="original", prefix=fill(missing, length(rats)))
-rats_df = add_extrema!(rats_df)
-
-# Add all rational slopes to sturmian_slopes_df
-df_rats_and_irrats = vcat(
-    sturmian_slopes_df,
-    rats_df;
-    cols = :union
-)
-
-phason_angle_range = collect(0.0:0.01:1.0)
-
-seqs = Vector{Vector{Int}}()
-phis = Vector{Float64}()
-phasons = Vector{Float64}()
-for phason in phason_angle_range
-    for (i, row) in enumerate(eachrow(df_rats_and_irrats))
-        phi = row.slope
-        comp_phi = 1.0 - phi
-        seq = cut_and_project_sequence(N, phi; gamma=phason, map_to=map_to)
-        comp_seq = cut_and_project_sequence(N, comp_phi; gamma=phason, map_to=map_to)
-        push!(seqs, seq)
-        push!(seqs, comp_seq)
-        push!(phis, phi)
-        push!(phis, comp_phi)
-        push!(phasons, phason)
-        push!(phasons, phason)
+function algorithmic_cap(N::Int, alpha::Float64; gamma::Float64=0.0, map_to::Tuple{Int,Int}=(1,2))
+    @assert N >= 1 "N must be >= 1"
+    gamma = gamma - floor(gamma) # wrap into [0,1)
+    alpha = alpha - floor(alpha)
+    seq = Vector{Int}(undef, N)
+    for n in 1:N
+        term_1 = floor((n + 1) * alpha + gamma)
+        term_2 = floor(n * alpha + gamma)
+        out_of_bounds_correction = floor(alpha)
+        diff = term_1 - term_2 #- out_of_bounds_correction
+        if diff == 1
+            seq[n] = map_to[1]
+        else
+            seq[n] = map_to[2]
+        end
     end
+    return seq
 end
 
-outdir = joinpath(@__DIR__, "sturm_seq_sets")
-outfile = joinpath(outdir, slope_file[1:end-5] * "_N$(N)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_const_mapping.bson")
-@save outfile phis seqs phasons
-println("Saved $(length(phis)) phis, $(length(seqs)) sequences to ", outfile)
-##############################################################################
+# ##############################################################################
+# ## Usage 1: slopes and 1-slopes in interval [0,1] with consistent map_to=(2,1)
+# ##############################################################################
+# slope_file = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false.bson"
+# N=500
+# map_to = (2,1) # (2,1) makes slope=0.0 1,1,1,1,... and slope=1.0 2,2,2,2,...
+# phason_angle_range = collect(0.0:0.01:1.0)
+
+# indir = joinpath(@__DIR__, "sturm_grad_sets")
+# infile = joinpath(indir, slope_file)
+# println("Loading Sturmian slopes from ", infile)
+# sturmian_slopes_df = load_sturmian_grad_bson(infile)
+
+# rats, _ = add_rationals(10; start_r=2)
+# rats_df = DataFrame(slope=rats, origin="rational", type="original", prefix=fill(missing, length(rats)))
+# rats_df = add_extrema!(rats_df)
+
+# # Add all rational slopes to sturmian_slopes_df
+# df_rats_and_irrats = vcat(
+#     sturmian_slopes_df,
+#     rats_df;
+#     cols = :union
+# )
+
+
+# seqs = Vector{Vector{Int}}()
+# phis = Vector{Float64}()
+# phasons = Vector{Float64}()
+# for phason in phason_angle_range
+#     for (i, row) in enumerate(eachrow(df_rats_and_irrats))
+#         phi = row.slope
+#         comp_phi = 1.0 - phi
+#         seq = cut_and_project_sequence(N, phi; gamma=phason, map_to=map_to)
+#         comp_seq = cut_and_project_sequence(N, comp_phi; gamma=phason, map_to=map_to)
+#         push!(seqs, seq)
+#         push!(seqs, comp_seq)
+#         push!(phis, phi)
+#         push!(phis, comp_phi)
+#         push!(phasons, phason)
+#         push!(phasons, phason)
+#     end
+# end
+
+# outdir = joinpath(@__DIR__, "sturm_seq_sets")
+# outfile = joinpath(outdir, slope_file[1:end-5] * "_N$(N)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_const_mapping.bson")
+# @save outfile phis seqs phasons
+# println("Saved $(length(phis)) phis, $(length(seqs)) sequences to ", outfile)
+# ##############################################################################
+
+
+
+# ##############################################################################
+# ## Usage 2: For specific single slope value: slopes and 1-slopes in interval [0,1] with consistent map_to=(2,1)
+# ##############################################################################
+# slope_file = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false.bson"
+# N=500
+# map_to = (2,1) # (2,1) makes slope=0.0 1,1,1,1,... and slope=1.0 2,2,2,2,...
+# phason_angle_range = collect(0.0:0.01:1.0)
+
+# target_phi = 0.61803398875  # Example: Golden Mean (1/phi)
+# tol = 1e-4                  # Tolerance
+
+# indir = joinpath(@__DIR__, "sturm_grad_sets")
+# infile = joinpath(indir, slope_file)
+# println("Loading Sturmian slopes from ", infile)
+# sturmian_slopes_df = load_sturmian_grad_bson(infile)
+
+# # Filter for the specific slope
+# mask = abs.(sturmian_slopes_df.slope .- target_phi) .< tol
+# if count(mask) == 0
+#     error("No slope found within tolerance $tol of $target_phi")
+# end
+
+# # Take the first match (or the closest one)
+# subset_df = sturmian_slopes_df[mask, :]
+# best_match_idx = argmin(abs.(subset_df.slope .- target_phi))
+# selected_phi = subset_df.slope[best_match_idx]
+
+# println("Selected slope: $selected_phi (Target: $target_phi)")
+
+# seqs = Vector{Vector{Int}}()
+# phis = Vector{Float64}()
+# phasons = Vector{Float64}()
+# for phason in phason_angle_range
+#     # Generate sequence for the selected phi
+#     seq = cut_and_project_sequence(N, selected_phi; gamma=phason, map_to=map_to)
+#     push!(seqs, seq)
+#     push!(phis, selected_phi)
+#     push!(phasons, phason)
+
+#     # # Optional: Generate complementary sequence (1 - phi) if needed
+#     # comp_phi = 1.0 - selected_phi
+#     # comp_seq = cut_and_project_sequence(N, comp_phi; gamma=phason, map_to=map_to)
+#     # push!(seqs, comp_seq)
+#     # push!(phis, comp_phi)
+#     # push!(phasons, phason)
+# end
+
+
+# outdir = joinpath(@__DIR__, "sturm_seq_sets")
+# outfile = joinpath(outdir, slope_file[1:end-5] * "_single_slope_$(round(selected_phi, digits=5))_N$(N)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_const_mapping.bson")
+# @save outfile phis seqs phasons
+# println("Saved $(length(phis)) sequences for slope $selected_phi to ", outfile)
+# ##############################################################################
 
 
 
@@ -267,7 +352,7 @@ println("Saved $(length(phis)) phis, $(length(seqs)) sequences to ", outfile)
 # ## Usage 3: slopes in (0,1) U (1, ∞) U (-∞, 0) with consistent map_to=(1,2)
 # ##############################################################################
 # slope_file = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false.bson"
-# N = 1000
+# N = 2000
 
 # indir = joinpath(@__DIR__, "sturm_grad_sets")
 # infile = joinpath(indir, slope_file)
@@ -287,7 +372,8 @@ println("Saved $(length(phis)) phis, $(length(seqs)) sequences to ", outfile)
 # for phason in phason_angle_range
 #     for row in eachrow(full_slope_df)
 #         phi = row.slope
-#         seq = generalised_cut_and_project_sequence(N, phi; gamma=phason, map_to=(1,2))
+#         # seq = generalised_cut_and_project_sequence(N, phi; gamma=phason, map_to=(1,2))
+#         seq = algorithmic_cap(N, phi; gamma=phason, map_to=(1,2))
 #         push!(seqs, seq)
 #         push!(phis, phi)
 #         push!(phasons, phason)
@@ -308,9 +394,236 @@ println("Saved $(length(phis)) phis, $(length(seqs)) sequences to ", outfile)
 # # println("all sequences in full: ", seqs)
 
 # outdir = joinpath(@__DIR__, "sturm_seq_sets")
-# outfile = joinpath(outdir, slope_file[1:end-5] * "_N$(N)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_generalised.bson")
+# outfile = joinpath(outdir, slope_file[1:end-5] * "_N$(N)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_algorithmic_generalised.bson")
 # @save outfile phis seqs phasons origins types
 # println("Saved $(length(phis)) phis with phason range $(phason_angle_range). Overall $(length(seqs)) sequences added to ", outfile)
 # ##############################################################################
 
 
+
+
+# ##############################################################################
+# ## Usage 4: Generate slopes as in Hofstadter butterfly (all reduced p/q, plus irrationals)
+# ##############################################################################
+# N = 1000
+# map_to = (2,1)
+# qmin, qmax = 2, N
+
+# # 1. Threaded generation of all reduced rationals p/q in [0,1]
+# slopes = Float64[]
+# slope_lock = SpinLock()
+# slope_prog = Progress(qmax - qmin + 1; desc="Generating slopes")
+
+# @threads for q in qmin:qmax
+#     local_chunk = Float64[]
+#     sizehint!(local_chunk, q)
+#     for p in 1:q-1
+#         if gcd(p, q) == 1
+#             push!(local_chunk, p / q)
+#         end
+#     end
+#     lock(slope_lock)
+#     append!(slopes, local_chunk)
+#     next!(slope_prog)
+#     unlock(slope_lock)
+# end
+
+# push!(slopes, 0.0, 1.0)
+# sort!(slopes)
+# unique!(slopes)
+
+# phason_angle_range = collect(0.0:0.01:1.0)
+# n_phi = length(slopes)
+# n_phason = length(phason_angle_range)
+# slot_count = n_phi * n_phason
+
+# seqs = Vector{Vector{Int}}(undef, slot_count)
+# phis = Vector{Float64}(undef, slot_count)
+# phasons = Vector{Float64}(undef, slot_count)
+
+# seq_lock = SpinLock()
+# seq_prog = Progress(n_phason; desc="Cut-and-project")
+
+# @threads for ip in 1:n_phason
+#     phason = phason_angle_range[ip]
+#     base = (ip - 1) * n_phi
+#     for is in 1:n_phi
+#         idx = base + is
+#         phi = slopes[is]
+#         seqs[idx] = cut_and_project_sequence(N, phi; gamma=phason, map_to=map_to)
+#         phis[idx] = phi
+#         phasons[idx] = phason
+#     end
+#     lock(seq_lock); next!(seq_prog); unlock(seq_lock)
+# end
+# println("Generated $(length(phis)) slopes.")
+
+# ## Rebalance distribution (keep ≤ nperbin unique φ per bin, retain all phasons per φ)
+# nbins = 500
+# nperbin = 1
+# edges = range(0.0, stop=1.0, length=nbins + 1)
+
+# unique_phis = unique(phis)
+# phi_to_inds = Dict{Float64, Vector{Int}}()
+# for (i, phi) in enumerate(phis)
+#     push!(get!(phi_to_inds, phi, Int[]), i)
+# end
+
+# bin_idx = clamp.(searchsortedfirst.(Ref(edges), unique_phis) .- 1, 1, nbins)
+# selected_unique = falses(length(unique_phis))
+# counts = zeros(Int, nbins)
+# for i in eachindex(unique_phis)
+#     b = bin_idx[i]
+#     if counts[b] < nperbin
+#         selected_unique[i] = true
+#         counts[b] += 1
+#     end
+# end
+
+# selected_phis = unique_phis[selected_unique]
+# selected_inds = reduce(vcat, [phi_to_inds[phi] for phi in selected_phis])
+# phis = phis[selected_inds]
+# seqs = seqs[selected_inds]
+# phasons = phasons[selected_inds]
+# println("Rebalanced to $(length(selected_phis)) unique slopes -> $(length(phis)) sequences across $(length(phason_angle_range)) phasons (nbins=$nbins, nperbin=$nperbin).")
+
+# println("Plotting distribution of generated slopes...")
+# plt = histogram(
+#     phis;
+#     bins = nbins,
+#     xlabel = "Slope φ",
+#     ylabel = "Count",
+#     title = "Density distribution of generated slopes (N=$N)",
+#     legend = false,
+#     normalize = false
+# )
+# savefig_dir = joinpath(@__DIR__, "slope_density_dists")
+# isdir(savefig_dir) || mkpath(savefig_dir)
+# savefig(plt, joinpath(savefig_dir, "hof_style_slopes_N$(N)_slope_distribution.png"))
+
+# println("Saving $(length(phis)) phis, $(length(seqs)) sequences...")
+# outdir = joinpath(@__DIR__, "sturm_seq_sets")
+# outfile = joinpath(outdir, "hof_style_slopes_N$(N)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_nbins$(nbins)_npb$(nperbin).bson")
+# @save outfile phis seqs phasons
+# println("Saved $(length(phis)) phis, $(length(seqs)) sequences to ", outfile)
+# ##############################################################################
+
+##############################################################################
+## Usage 4: Generate slopes as in Hofstadter butterfly (all reduced p/q, plus irrationals)
+##############################################################################
+N = 1000
+map_to = (2,1)
+qmin, qmax = 2, N
+
+# 1. Threaded generation of all reduced rationals p/q in [0,1]
+slopes = Float64[]
+slope_lock = SpinLock()
+slope_prog = Progress(qmax - qmin + 1; desc="Generating slopes")
+
+@threads for q in qmin:qmax
+    local_chunk = Float64[]
+    sizehint!(local_chunk, q)
+    for p in 1:q-1
+        if gcd(p, q) == 1
+            push!(local_chunk, p / q)
+        end
+    end
+    lock(slope_lock)
+    append!(slopes, local_chunk)
+    next!(slope_prog)
+    unlock(slope_lock)
+end
+
+push!(slopes, 0.0, 1.0)
+sort!(slopes)
+unique!(slopes)
+
+println("Initially generated $(length(slopes)) slopes.")
+
+## Rebalance distribution EARLY to save RAM
+## (keep ≤ nperbin unique φ per bin, retain all phasons per φ)
+nbins = 1000
+nperbin = 1
+edges = range(0.0, stop=1.0, length=nbins + 1)
+
+bin_idx = clamp.(searchsortedfirst.(Ref(edges), slopes) .- 1, 1, nbins)
+selected_unique = falses(length(slopes))
+counts = zeros(Int, nbins)
+for i in eachindex(slopes)
+    b = bin_idx[i]
+    if counts[b] < nperbin
+        selected_unique[i] = true
+        counts[b] += 1
+    end
+end
+
+slopes = slopes[selected_unique]
+println("Rebalanced to $(length(slopes)) unique slopes (nbins=$nbins, nperbin=$nperbin).")
+
+## Optional: Filter for target slope
+target_slope = 2/(1 + sqrt(5)) # Set to a Float64 (e.g. 1/phi) to enable filtering, or nothing to disable
+slope_tol = 0.001
+
+if !isnothing(target_slope)
+    filter!(s -> abs(s - target_slope) <= slope_tol, slopes)
+    println("Filtered to $(length(slopes)) slopes within tolerance $slope_tol of target $target_slope.")
+    if isempty(slopes)
+        @warn "No slopes remained after filtering for target $target_slope with tolerance $slope_tol."
+    end
+end
+
+## Overwrite to define literal slope
+# slopes = [0.6180048661800487]
+slopes = [target_slope]
+
+phason_angle_range = [0.0] #collect(0.0:0.01:1.0)
+n_phi = length(slopes)
+n_phason = length(phason_angle_range)
+slot_count = n_phi * n_phason
+
+println("Allocating space for $slot_count sequences...")
+seqs = Vector{Vector{Int}}(undef, slot_count)
+phis = Vector{Float64}(undef, slot_count)
+phasons = Vector{Float64}(undef, slot_count)
+
+seq_lock = SpinLock()
+seq_prog = Progress(n_phason; desc="Cut-and-project")
+
+@threads for ip in 1:n_phason
+    phason = phason_angle_range[ip]
+    base = (ip - 1) * n_phi
+    for is in 1:n_phi
+        idx = base + is
+        phi = slopes[is]
+        seqs[idx] = cut_and_project_sequence(N, phi; gamma=phason, map_to=map_to)
+        phis[idx] = phi
+        phasons[idx] = phason
+    end
+    lock(seq_lock); next!(seq_prog); unlock(seq_lock)
+end
+println("Generated $(length(phis)) sequences across $(length(phason_angle_range)) phasons.")
+
+# println("Plotting distribution of generated slopes...")
+# plt = histogram(
+#     slopes;
+#     bins = nbins,
+#     xlabel = "Slope φ",
+#     ylabel = "Count",
+#     title = "Density distribution of generated slopes (N=$N)",
+#     legend = false,
+#     normalize = false
+# )
+# savefig_dir = joinpath(@__DIR__, "slope_density_dists")
+# isdir(savefig_dir) || mkpath(savefig_dir)
+# savefig(plt, joinpath(savefig_dir, "hof_style_slopes_N$(N)_slope_distribution.png"))
+
+println("Saving $(length(phis)) phis, $(length(seqs)) sequences...")
+outdir = joinpath(@__DIR__, "sturm_seq_sets")
+if target_slope !== nothing
+    outfile = joinpath(outdir, "hof_style_slopes_N$(N)_target_$(round(target_slope, digits=5))_tol_$(slope_tol)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_nbins$(nbins)_npb$(nperbin).bson")
+else
+    outfile = joinpath(outdir, "hof_style_slopes_N$(N)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_nbins$(nbins)_npb$(nperbin).bson")
+end
+@save outfile phis seqs phasons
+println("Saved $(length(phis)) phis, $(length(seqs)) sequences to ", outfile)
+##############################################################################

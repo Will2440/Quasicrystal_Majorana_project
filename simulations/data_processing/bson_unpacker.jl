@@ -29,6 +29,7 @@ using BSON
 using DataFrames
 using Glob
 using Logging
+using ProgressMeter
 
 ###########################################################
 ############## Sec 1: Auxilliary Functions ################
@@ -65,20 +66,137 @@ function process_bson_files(folder_path::String)
     
     file_paths = glob("*.bson", folder_path)
     files_read = 0
-    for file_path in file_paths
-        bson_data = BSON.load(file_path)
+    failed_files = String[]
+
+    @showprogress for file_path in file_paths
+        bson_data = nothing
+        try
+            bson_data = BSON.load(file_path)
+        catch err
+            push!(failed_files, file_path)
+            @warn "Failed to load BSON file (skipping)" file=file_path error=err
+            continue
+        end
+
         if haskey(bson_data, :results_df)
-            # Extract the DataFrame stored in the `results_df` key
             results_df = DataFrame(bson_data[:results_df])
-            
             append!(combined_dataframe, results_df)
             files_read += 1
+        else
+            @warn "BSON file missing :results_df key (skipping)" file=file_path
         end
     end
-    println("number of files read: $files_read")
+
+    println("number of files read: $files_read / $(length(file_paths))")
+    if !isempty(failed_files)
+        @warn "Some BSON files could not be processed" failed_count=length(failed_files) failed_files=failed_files
+    end
     
     return combined_dataframe
 end
+
+function process_bson_files_with_winding(folder_path::String)
+    combined_dataframe = DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        sequence_id = Any[],
+        mp = Float64[],
+        maj_gap = Float64[],
+        ipr = Float64[],
+        loc_len = Float64[],
+        phase_winding = Float64[],
+        eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
+        eigenvectors = Union{Matrix{Float64}, Matrix{BigFloat}, Missing}[]
+    )
+    
+    file_paths = glob("*.bson", folder_path)
+    files_read = 0
+    failed_files = String[]
+
+    @showprogress for file_path in file_paths
+        bson_data = nothing
+        try
+            bson_data = BSON.load(file_path)
+        catch err
+            push!(failed_files, file_path)
+            @warn "Failed to load BSON file (skipping)" file=file_path error=err
+            continue
+        end
+
+        if haskey(bson_data, :results_df)
+            results_df = DataFrame(bson_data[:results_df])
+            append!(combined_dataframe, results_df)
+            files_read += 1
+        else
+            @warn "BSON file missing :results_df key (skipping)" file=file_path
+        end
+    end
+
+    println("number of files read: $files_read / $(length(file_paths))")
+    if !isempty(failed_files)
+        @warn "Some BSON files could not be processed" failed_count=length(failed_files) failed_files=failed_files
+    end
+    
+    return combined_dataframe
+end
+
+
+# ------------------------------
+## Partitioned processing Functions
+function _init_results_dataframe()
+    return DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        sequence_id = Any[],
+        mp = Float64[],
+        maj_gap = Float64[],
+        ipr = Float64[],
+        loc_len = Float64[],
+        eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
+        eigenvectors = Union{Matrix{Float64}, Matrix{BigFloat}, Missing}[]
+    )
+end
+
+function process_bson_file_list(file_paths::Vector{String}; desc::AbstractString="BSON files")
+    combined_dataframe = _init_results_dataframe()
+    files_read = 0
+    failed_files = String[]
+
+    isempty(file_paths) && return (df=combined_dataframe, files_read=0, failed_files=failed_files, total=0)
+
+    @showprogress desc for file_path in file_paths
+        bson_data = nothing
+        try
+            bson_data = BSON.load(file_path)
+        catch err
+            push!(failed_files, file_path)
+            @warn "Failed to load BSON file (skipping)" file=file_path error=err
+            continue
+        end
+
+        if haskey(bson_data, :results_df)
+            results_df = DataFrame(bson_data[:results_df])
+            append!(combined_dataframe, results_df)
+            files_read += 1
+        else
+            @warn "BSON file missing :results_df key (skipping)" file=file_path
+        end
+    end
+
+    println("number of files read ($desc): $files_read / $(length(file_paths))")
+    if !isempty(failed_files)
+        @warn "$desc contained unreadable BSON files" failed_count=length(failed_files) failed_files=failed_files
+    end
+    
+    return (df=combined_dataframe, files_read=files_read, failed_files=failed_files, total=length(file_paths))
+end
+# ------------------------------
 
 # function calc_norms_df!(df::DataFrame)
 #     df.rho = [row.t_n[2] / row.t_n[1] for row in eachrow(df)]
@@ -375,6 +493,15 @@ function unpack_bson_hofstadter(folder_path::String; mp_targ=-1.0, mp_tol=1e-1, 
     println("DataFrame keynames: $(names(df))")
     return df
 end
+
+# function unpack_bson_hofstadter_RAMopt(folder_path::String)
+#     df = process_bson_files(folder_path)
+#     df = calc_norms_df!(df)
+
+#     println("DataFrame keynames: $(names(df))")
+#     return df
+# end
+
 
 # # Example Usage
 # folder_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/hp/abundance_data/SQC_N(50-50-1)_t1(1.0-1.0-1_t2(0.0-10.0-101)_mu(0.0-10.0-101)_Delta(0.1-2.0-20)"
