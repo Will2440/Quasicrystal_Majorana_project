@@ -105,7 +105,9 @@ function smallData_plt_discrete_phase_projections(
         xlabel=string(x_variable),
         ylabel=string(y_variable),
         grid=true,
-        size=(800,600)
+        size=(800,600),
+        xlims=xlims,
+        ylims=ylims
     )
 
     # Overlay final regression line if provided
@@ -137,6 +139,8 @@ function plt_discrete_phase_projections(
     savepath::String;
     final_line_data=nothing,
     final_poly_data=nothing,
+    plt_xlims::Union{Tuple{Real,Real},Nothing}=nothing,
+    plt_ylims::Union{Tuple{Real,Real},Nothing}=nothing,
     fixed_values...
 )
     """
@@ -190,17 +194,52 @@ function plt_discrete_phase_projections(
 
     println(length(x_points), " points to plot")
 
+    # --- Plotting ---
+    # Axes limits with padding
+    pad_pc = 0.05
+    if isnothing(plt_xlims)
+        if !isempty(x_points)
+            xmin = minimum(x_points); xmax = maximum(x_points)
+            x_span = xmax - xmin; x_span = x_span == 0 ? 1.0 : x_span
+            x_pad = pad_pc * x_span
+            xlims = (xmin - x_pad, xmax + x_pad)
+        else
+            xlims = :auto
+        end
+    else
+        xlims = plt_xlims
+    end
+
+    if isnothing(plt_ylims)
+        if !isempty(y_points)
+            ymin = minimum(y_points); ymax = maximum(y_points)
+            y_span = ymax - ymin; y_span = y_span == 0 ? 1.0 : y_span
+            y_pad = pad_pc * y_span
+            ylims = (ymin - y_pad, ymax + y_pad)
+        else
+            ylims = :auto
+        end
+    else
+        ylims = plt_ylims
+    end
+
     plt = Plots.scatter(
         x_points, y_points;
-        markersize=0.1,
+        markersize=1.0,
         markerstrokewidth=0,
         legend=false,
-        xlabel="mu_mp",
-        ylabel="phi",
-        grid=true,
-        size=(800,600)
+        xlabel="", #"mu_mp",
+        ylabel="", #"phi",
+        grid=false,
+        axes=false,
+        ticks=false,
+        framestyle=:none,
+        size=(800,800),
+        xlims=xlims,
+        ylims=ylims,
+        bg=:transparent,
+        color=colorant"#440154",
     )
-
     # Overlay final regression line if provided
     if final_line_data !== nothing
         a, b = final_line_data.a, final_line_data.b
@@ -325,9 +364,97 @@ function plt_plateaus_vs_phi_idop(df::DataFrame, savepath::String; fixed_values.
     # Plots.display(plt)
 end
 
+
+
 ###########################################
 ########## Gap-labelled plotting ##########
 ###########################################
+
+
+## Colour Colorscheme
+function q_anchor_colormap(qs::Vector{Int})
+    lerp(c1::RGB, c2::RGB, t) = RGB((1-t)*c1.r + t*c2.r,
+                                    (1-t)*c1.g + t*c2.g,
+                                    (1-t)*c1.b + t*c2.b)
+
+    qs_sorted = sort(qs)
+    
+    # --- SENTINEL HANDLING ---
+    SC_GAP_Q = 9999
+    has_sentinel = SC_GAP_Q in qs_sorted
+    
+    # Filter out sentinel for gradient calculation
+    qs_phys = filter(!=(SC_GAP_Q), qs_sorted)
+    # -------------------------
+
+    cmap = fill(RGB(0.7,0.7,0.7), length(qs_phys))
+
+    idx_neg_high = 1
+    idx_neg1     = findfirst(==( -1), qs_phys)
+    idx_pos1     = findfirst(==(  1), qs_phys)
+    idx_pos_high = length(qs_phys)
+
+    col_neg_light = RGB(0.35, 0.75, 1.00)   # q = -1
+    col_neg_dark  = RGB(0.05, 0.10, 0.45)   # mid dark blue
+    col_neg_purp  = RGB(0.25, 0.00, 0.50)   # dark purple
+    col_neg_high  = RGB(0.78, 0.20, 1.00)   # bright purple (most negative)
+
+    col_pos_light = RGB(1.00, 0.60, 0.10)   # light orange
+    col_pos_yell  = RGB(1.00, 0.95, 0.40)   # light yellow
+    col_pos_high  = RGB(0.00, 1.00, 0.00)   # green (most positive)
+
+    cmap[idx_neg_high] = col_neg_high
+    
+    if !isnothing(idx_neg1); cmap[idx_neg1] = col_neg_light; end
+    if !isnothing(idx_pos1); cmap[idx_pos1] = RGB(1.0,0.0,0.0); end
+
+    if !isnothing(idx_neg1) && idx_neg1 > idx_neg_high
+        span = idx_neg1 - idx_neg_high
+        for (j,i) in enumerate(idx_neg_high+1:idx_neg1-1)
+            t = j / span
+            if t < 1/3
+                cmap[i] = lerp(col_neg_high, col_neg_purp, t/(1/3))
+            elseif t < 2/3
+                cmap[i] = lerp(col_neg_purp, col_neg_dark, (t-1/3)/(1/3))
+            else
+                cmap[i] = lerp(col_neg_dark, col_neg_light, (t-2/3)/(1/3))
+            end
+        end
+    end
+
+    if !isnothing(idx_pos1) && idx_pos_high > idx_pos1
+        span = idx_pos_high - idx_pos1
+        for (j,i) in enumerate(idx_pos1+1:idx_pos_high)
+            t = j / span
+            if t < 0.33
+                cmap[i] = lerp(RGB(1.0,0.0,0.0), col_pos_light, t/0.33)
+            elseif t < 0.66
+                cmap[i] = lerp(col_pos_light, col_pos_yell, (t-0.33)/0.33)
+            else
+                cmap[i] = lerp(col_pos_yell, col_pos_high, (t-0.66)/0.34)
+            end
+        end
+    end
+
+    if !isnothing(idx_neg1) && !isnothing(idx_pos1) && idx_pos1 - idx_neg1 > 1
+        span = idx_pos1 - idx_neg1
+        for (j,i) in enumerate(idx_neg1+1:idx_pos1-1)
+            t = j / span
+            cmap[i] = lerp(col_neg_light, RGB(1.0,0.0,0.0), t)
+        end
+    end
+
+    # --- RECONSTRUCT MAP WITH SENTINEL ---
+    # Map q -> color
+    color_dict = Dict(q => c for (q,c) in zip(qs_phys, cmap))
+    
+    if has_sentinel
+        color_dict[SC_GAP_Q] = RGB(0.85, 0.85, 0.85) # Light Grey for SC gaps
+    end
+    
+    # Return colors in the order of the original sorted input
+    return [color_dict[q] for q in qs_sorted]
+end
 
 """
 Plot IDOP plateaus vs. phi, colored by gap labels (p/q).
@@ -954,6 +1081,8 @@ function plt_lowest_eigs_vs_phason(
     mu_neg = Float64[]
     phason_neg = Float64[]
     neg_eigs = Float64[]
+    log_pos_eigs = Float64[]
+    log_neg_eigs = Float64[]
 
     for row in eachrow(filtered_rows)
         phason_val = getproperty(row, :phason)
@@ -966,22 +1095,38 @@ function plt_lowest_eigs_vs_phason(
                 push!(mu_pos, mu)
                 push!(phason_pos, phason_val)
                 push!(pos_eigs, pos_eig)
+                push!(log_pos_eigs, log(pos_eig))
             end
             if !ismissing(neg_eig)
                 push!(mu_neg, mu)
                 push!(phason_neg, phason_val)
                 push!(neg_eigs, neg_eig)
+                push!(log_neg_eigs, log(abs(neg_eig)))
             end
         end
     end
 
-    # println(length(mu_pos), " positive points, ", length(mu_neg), " negative points to plot")
+    # Helper to grid data for heatmap
+    function _xyz_to_matrix(xs, ys, zs)
+        isempty(xs) && return Float64[], Float64[], Matrix{Float64}(undef, 0, 0)
+        xr = round.(xs, digits=9)
+        yr = round.(ys, digits=9)
+        ux = sort(unique(xr))
+        uy = sort(unique(yr))
+        x_map = Dict(v => i for (i, v) in enumerate(ux))
+        y_map = Dict(v => i for (i, v) in enumerate(uy))
+        mat = fill(NaN, length(uy), length(ux))
+        for (x, y, z) in zip(xr, yr, zs)
+            mat[y_map[y], x_map[x]] = z
+        end
+        return ux, uy, mat
+    end
 
     # Create side-by-side plots
     plt = Plots.plot(
         layout=(1,2),
         size=(1200,600),
-        grid=true,
+        grid=false,
         left_margin = 8mm,
         right_margin = 10mm,
         top_margin = 5mm,
@@ -989,161 +1134,654 @@ function plt_lowest_eigs_vs_phason(
     )
 
     # Left: Positive eigenvalues
-    if !isempty(pos_eigs)
-        min_pos = minimum(pos_eigs)
-        max_pos = maximum(pos_eigs)
-        # println("Positive eigenvalue range: [$min_pos, $max_pos]")
-        ticks_pos = range(min_pos, max_pos, length=5)  # 5 ticks for range
-        Plots.scatter!(
+    pos_eigs_plt = log_pos_eigs
+    if !isempty(pos_eigs_plt)
+        min_pos = minimum(pos_eigs_plt)
+        max_pos = maximum(pos_eigs_plt)
+        
+        ux, uy, mat = _xyz_to_matrix(mu_pos, phason_pos, pos_eigs_plt)
+        
+        Plots.heatmap!(
             plt[1],
-            mu_pos, phason_pos;
-            marker_z=pos_eigs,
-            label="min(+E)",
-            markersize=2,
-            markerstrokewidth=0,
+            ux, uy, mat;
             color=:viridis,
             xlabel="mu",
             ylabel="phason",
             title="Lowest Positive Eigenvalues",
             colorbar=true,
             colorbar_title="+E",
-            # colorbar_ticks=ticks_pos,
             clims=(min_pos, max_pos),
-            xlim=(0.0, 3.0),
+            xlim=(-3.0, 3.0),
             ylims=(0.0, 1.0)
         )
+    else 
+        @warn "No positive eigenvalue data to plot."
     end
-    # Shaded missing regions
-    Plots.vspan!(plt[1], [0.0, 0.6], color=:gray, alpha=0.3, label="Missing data")
-    Plots.vspan!(plt[1], [1.4, 1.8], color=:gray, alpha=0.3, label="")
-    Plots.vspan!(plt[1], [2.2, 3.0], color=:gray, alpha=0.3, label="")
 
     # Right: Negative eigenvalues
-    if !isempty(neg_eigs)
-        min_neg = minimum(neg_eigs)
-        max_neg = maximum(neg_eigs)
-        # println("Negative eigenvalue range: [$min_neg, $max_neg]")
-        ticks_neg = range(min_neg, max_neg, length=5)  # 5 ticks for range
-        Plots.scatter!(
+    neg_eigs_plt = log_neg_eigs
+    if !isempty(neg_eigs_plt)
+        min_neg = minimum(neg_eigs_plt)
+        max_neg = maximum(neg_eigs_plt)
+        
+        ux, uy, mat = _xyz_to_matrix(mu_neg, phason_neg, neg_eigs_plt)
+
+        Plots.heatmap!(
             plt[2],
-            mu_neg, phason_neg;
-            marker_z=neg_eigs,
-            label="min(-E)",
-            markersize=2,
-            markerstrokewidth=0,
+            ux, uy, mat;
             color=:viridis,
             xlabel="mu",
             ylabel="phason",
             title="Lowest Negative Eigenvalues",
             colorbar_title="-E",
             colorbar=:right,
-            # colorbar_ticks=ticks_neg,
             clims=(min_neg, max_neg),
-            xlim=(0.0, 3.0),
+            xlim=(-3.0, 3.0),
             ylims=(0.0,1.0)
         )
+    else 
+        @warn "No negative eigenvalue data to plot."
     end
-    # Shaded missing regions
-    Plots.vspan!(plt[2], [0.0, 0.6], color=:gray, alpha=0.3, label="Missing data")
-    Plots.vspan!(plt[2], [1.4, 1.8], color=:gray, alpha=0.3, label="")
-    Plots.vspan!(plt[2], [2.2, 3.0], color=:gray, alpha=0.3, label="")
 
     Plots.savefig(plt, savepath)
 end
 
-function plt_gap_eigs_vs_phason(
-    df::DataFrame,
-    savepath::String;
-    fixed_values...
-)
-    """
-    Plot gap eigenvalues vs phason (y) and mu (x), with two side-by-side subplots:
-    - Left: Positive gap eigenvalues (closest to zero in gaps).
-    - Right: Negative gap eigenvalues.
-    - Highlights missing mu ranges (0.0-0.6, 1.4-1.8, 2.2-3.0) with shaded gray areas.
-    - X-axis limited to 0.0-3.0.
-    """
-    # Filter by fixed values
-    _kv_match(row, key, val) = begin
-        rv = getproperty(row, key)
-        (rv isa Number && val isa Number) ? isapprox(rv, val; atol=1e-8, rtol=1e-6) : (rv == val)
-    end
-    _row_matches(row, kvs) = all(_kv_match(row, k, v) for (k,v) in kvs)
+function plt_lowest_eigs_vs_phason_with_winding_rects(df, filename, gaps_pos, gaps_neg, mu_values, color_dict)
+    df_sorted = sort(df, :phason)
+    phasons = df_sorted.phason
+    n_mu = length(mu_values)
+    n_phason = length(phasons)
     
-    filtered_rows = isempty(fixed_values) ? df : filter(row -> _row_matches(row, fixed_values), df)
-    if isempty(filtered_rows)
-        @warn "No data matches fixed_values for plotting: $fixed_values. Skipping plot."
-        return
+    # Prepare matrices (Transposed: x=mu, y=phason)
+    Z_pos = zeros(n_phason, n_mu)
+    Z_neg = zeros(n_phason, n_mu)
+    
+    for (j, row) in enumerate(eachrow(df_sorted))
+        # Positive Eigs
+        eigs_p = row.min_pos_eigs
+        if length(eigs_p) == n_mu
+            for i in 1:n_mu
+                Z_pos[j, i] = ismissing(eigs_p[i]) ? NaN : eigs_p[i]
+            end
+        end
+        
+        # Negative Eigs (check existence)
+        if hasproperty(row, :min_neg_eigs)
+            eigs_n = row.min_neg_eigs
+            if length(eigs_n) == n_mu
+                for i in 1:n_mu
+                    Z_neg[j, i] = ismissing(eigs_n[i]) ? NaN : eigs_n[i]
+                end
+            end
+        end
     end
-
-    # Prepare data for plotting
-    mu_all = Float64[]
-    phason_all = Float64[]
-    pos_gap_eigs_all = Float64[]
-    neg_gap_eigs_all = Float64[]
-
-    for row in eachrow(filtered_rows)
-        phason_val = getproperty(row, :phason)
-        mu_range = getproperty(row, :mu_range)
-        gap_pos_eigs = getproperty(row, :gap_pos_eigs)
-        gap_neg_eigs = getproperty(row, :gap_neg_eigs)
-
-        for (mu, pos_eig, neg_eig) in zip(mu_range, gap_pos_eigs, gap_neg_eigs)
-            push!(mu_all, mu)
-            push!(phason_all, phason_val)
-            push!(pos_gap_eigs_all, pos_eig)
-            push!(neg_gap_eigs_all, neg_eig)
+    
+    # Rectangle parameters
+    phason_min, phason_max = minimum(phasons), maximum(phasons)
+    phason_span = phason_max - phason_min
+    # Place rects above the plot. 
+    rect_height = 0.05 * (phason_span > 0 ? phason_span : 1.0)
+    rect_y_bottom = phason_max + 1.0 * rect_height
+    
+    # Helper to add rects
+    function add_rects!(p, gaps)
+        for (mu_start, mu_end, q) in gaps
+            c = get(color_dict, q, RGB(0.5, 0.5, 0.5)) # Default grey if q not in dict
+            plot!(p, 
+                [mu_start, mu_end, mu_end, mu_start],
+                [rect_y_bottom, rect_y_bottom, rect_y_bottom + rect_height, rect_y_bottom + rect_height],
+                seriestype=:shape,
+                color=c,
+                linecolor=nothing, 
+                linewidth=0.0,
+                label=false,
+                alpha=1.0 # Totally opaque
+            )
+            # Annotation removed
         end
     end
 
-    println(length(mu_all), " points to plot")
+    # Plot Negative Eigs (Left)
+    # clims adjusted for negative values close to zero
+    p1 = heatmap(mu_values, phasons, Z_neg, 
+        c=:viridis, clims=(-0.1, 0), 
+        title="Min Neg Eigs", xlabel="µ", ylabel="Phason",
+        ylim=(phason_min, phason_max + 2*rect_height) # Extend y-lim for rects
+    )
+    add_rects!(p1, gaps_neg)
+    
+    # Plot Positive Eigs (Right)
+    p2 = heatmap(mu_values, phasons, Z_pos, 
+        c=:viridis, clims=(0, 0.1), 
+        title="Min Pos Eigs", xlabel="µ", ylabel="",
+        ylim=(phason_min, phason_max + 2*rect_height)
+    )
+    add_rects!(p2, gaps_pos)
+    
 
-    # Create side-by-side plots
-    plt = Plots.plot(
-        layout=(1,2),
-        size=(1200,600),
-        grid=true
+    # --- Create Legend Plot (Horizontal Colorbar) ---
+    qs_legend = sort(collect(keys(color_dict)))
+    
+    if isempty(qs_legend)
+        p_final = plot(p1, p2, layout=@layout([a b]), size=(1200, 600), margin=5Plots.mm)
+    else
+        q_min, q_max = extrema(qs_legend)
+        
+        # Create a strip plot for the colorbar
+        p_legend = plot(
+            xlims=(q_min - 0.5, q_max + 0.5), 
+            ylims=(0, 1), 
+            framestyle=:box,      # Use box style to show axis lines
+            grid=false, 
+            yaxis=false,          # Hide Y axis
+            legend=false,
+            xlabel="q (winding number)",
+            bottom_margin=5Plots.mm,
+            top_margin=0Plots.mm,
+            ticks=:native         # Ensure ticks are shown
+        )
+        
+        # Draw colored rectangles for each q
+        for q in qs_legend
+            c = color_dict[q]
+            plot!(p_legend, 
+                Shape([q-0.5, q+0.5, q+0.5, q-0.5], [0, 0, 1, 1]), 
+                color=c, 
+                linecolor=nothing
+            )
+        end
+        
+        # Add x-ticks at integer values
+        # If too many values, thin them out or rotate
+        tick_vals = qs_legend
+        tick_labels = string.(qs_legend)
+        
+        # Simple thinning logic if very dense (e.g. > 30 ticks)
+        if length(tick_vals) > 30
+            # Keep every 2nd or 5th tick depending on density, always keep min/max/0
+            keep_mask = [i == 1 || i == length(tick_vals) || tick_vals[i] == 0 || i % 2 == 0 for i in 1:length(tick_vals)]
+            tick_vals = tick_vals[keep_mask]
+            tick_labels = tick_labels[keep_mask]
+        end
+
+        plot!(p_legend, xticks=(tick_vals, tick_labels), xrotation=0)
+
+        # Layout: 2 columns top, 1 row bottom (narrow height for the bar)
+        l = @layout [grid(1, 2)
+                     c{0.1h}]
+        
+        p_final = plot(p1, p2, p_legend, layout=l, size=(1200, 700), margin=5Plots.mm)
+    end
+    
+    savefig(p_final, filename)
+end
+
+function plt_lowest_eigs_winding_and_idop(df, filename, gaps_pos, gaps_neg, idop_labels, mu_values, color_dict; log_process::Bool=false, fit_results=nothing)
+    df_sorted = sort(df, :phason)
+    phasons = df_sorted.phason
+    n_mu = length(mu_values)
+    n_phason = length(phasons)
+    
+    # Prepare matrices (Transposed: x=mu, y=phason)
+    Z_pos = zeros(n_phason, n_mu)
+    Z_neg = zeros(n_phason, n_mu)
+    
+    # Epsilon for log calculation to avoid log(0)
+    eps_log = 1e-12
+
+    for (j, row) in enumerate(eachrow(df_sorted))
+        # Positive Eigs
+        eigs_p = row.min_pos_eigs
+        if length(eigs_p) == n_mu
+            if log_process
+                # Log scale: log10(|E|)
+                Z_pos[j, :] .= [ismissing(x) ? NaN : log10(abs(x) + eps_log) for x in eigs_p]
+            else
+                Z_pos[j, :] .= replace(eigs_p, missing => NaN)
+            end
+        end
+        
+        # Negative Eigs
+        if hasproperty(row, :min_neg_eigs)
+            eigs_n = row.min_neg_eigs
+            if length(eigs_n) == n_mu
+                if log_process
+                    # Log scale: log10(|E|) (Magnitude only, since we are in separate plots)
+                    Z_neg[j, :] .= [ismissing(x) ? NaN : log10(abs(x) + eps_log) for x in eigs_n]
+                else
+                    Z_neg[j, :] .= replace(eigs_n, missing => NaN)
+                end
+            end
+        end
+    end
+    
+    # Rectangle parameters
+    phason_min, phason_max = minimum(phasons), maximum(phasons)
+    phason_span = phason_max - phason_min
+    rect_height = 0.05 * (phason_span > 0 ? phason_span : 1.0)
+    
+    # Y-positions for the two rows of rectangles
+    # Row 1 (Bottom): Winding Number (calculated from phason evolution)
+    y_rect_winding = phason_max + 1.0 * rect_height
+    # Row 2 (Top): IDOP Label (calculated from GLT at phason=0)
+    y_rect_idop = y_rect_winding + 1.7 * rect_height
+    
+    # Helper to add rects
+    function add_rects!(p, gaps, y_bottom, label_text)
+        for (mu_start, mu_end, q) in gaps
+            c = get(color_dict, q, RGB(0.8, 0.8, 0.8)) 
+            plot!(p, 
+                [mu_start, mu_end, mu_end, mu_start],
+                [y_bottom, y_bottom, y_bottom + rect_height, y_bottom + rect_height],
+                seriestype=:shape,
+                color=c,
+                linecolor=nothing, 
+                linewidth=0.0,
+                label=false,
+                alpha=1.0
+            )
+        end
+        # Add label for the row
+        annotate!(p, mu_values[1], y_bottom + 0.5*rect_height, text(label_text, 8, :black, :right))
+    end
+
+    # Determine clims and titles based on log_process
+    if log_process
+        # Log scale limits: -10 (1e-10) to -1 (0.1)
+        clims_val = (-9, -1)
+        title_neg = "Min Neg Eigs (log10|E|)"
+        title_pos = "Min Pos Eigs (log10|E|)"
+    else
+        # Linear scale limits
+        clims_val = (-0.1, 0) # This was for negative raw values, but if we use abs() for log...
+        # Wait, original code used raw negative values for Z_neg.
+        # If log_process=false, we should stick to original behavior.
+        # Original Z_neg was negative numbers.
+        title_neg = "Min Neg Eigs"
+        title_pos = "Min Pos Eigs"
+    end
+
+    # Plot Negative Eigs (Left)
+    # Note: If log_process=false, Z_neg contains negative numbers, so clims=(-0.1, 0) is correct.
+    # If log_process=true, Z_neg contains log10(|E|), so clims=(-9, -1) is correct.
+    p1 = heatmap(mu_values, phasons, Z_neg, 
+        c=:viridis, 
+        clims=log_process ? clims_val : (-0.1, 0), 
+        title=title_neg, xlabel="Mu", ylabel="Phason",
+        ylim=(phason_min, y_rect_idop + 1.5*rect_height),
+        # xlims=(0.0, 3.0)
+    )
+    add_rects!(p1, gaps_neg, y_rect_winding, "Winding")
+    add_rects!(p1, idop_labels, y_rect_idop, "IDOP")
+    
+    # Plot Positive Eigs (Right)
+    p2 = heatmap(mu_values, phasons, Z_pos, 
+        c=:viridis, 
+        clims=log_process ? clims_val : (0, 0.1), 
+        title=title_pos, xlabel="Mu", ylabel="",
+        ylim=(phason_min, y_rect_idop + 1.5*rect_height),
+        # xlims=(0.0, 3.0)
+    )
+    add_rects!(p2, gaps_pos, y_rect_winding, "Winding")
+    add_rects!(p2, idop_labels, y_rect_idop, "IDOP")
+    
+    # Overlay fit results if available
+    if !isnothing(fit_results)
+        for res in fit_results
+            q_val = res.q
+            q_val == 0 && continue
+            theta = hasproperty(res, :theta) ? res.theta : q_val * pi / 2 .* res.phi
+            delta_shift = hasproperty(res, :delta_shift) ? res.delta_shift : mod2pi(res.delta + pi)
+            sine_mu = res.center .+ res.amp .* sin.(theta .+ res.delta)
+            opp_mu = res.center .+ res.amp .* sin.(theta .+ delta_shift)
+            plot!(p1, sine_mu, res.phi; color=RGBA(1.0, 0.0, 0.0, 0.5), linewidth=2.0, label=false)
+            plot!(p1, opp_mu, res.phi; color=RGBA(0.0, 0.0, 1.0, 0.5), linewidth=2.0, label=false)
+            plot!(p2, sine_mu, res.phi; color=RGBA(1.0, 0.0, 0.0, 0.5), linewidth=2.0, label=false)
+            plot!(p2, opp_mu, res.phi; color=RGBA(0.0, 0.0, 1.0, 0.5), linewidth=2.0, label=false)
+        end
+    end
+    
+    # --- Create Legend Plot (Horizontal Colorbar) ---
+    qs_legend = sort(collect(keys(color_dict)))
+    
+    if isempty(qs_legend)
+        p_final = plot(p1, p2, layout=@layout([a b]), size=(1200, 600), margin=5Plots.mm)
+    else
+        q_min, q_max = extrema(qs_legend)
+        
+        p_legend = plot(
+            xlims=(q_min - 0.5, q_max + 0.5), 
+            ylims=(0, 1), 
+            framestyle=:box, 
+            grid=false, 
+            yaxis=false,
+            legend=false,
+            xlabel="Winding Number q",
+            bottom_margin=5Plots.mm,
+            top_margin=0Plots.mm,
+            ticks=:native
+        )
+        
+        for q in qs_legend
+            c = color_dict[q]
+            plot!(p_legend, 
+                Shape([q-0.5, q+0.5, q+0.5, q-0.5], [0, 0, 1, 1]), 
+                color=c, linecolor=nothing
+            )
+        end
+        
+        # Ticks logic
+        tick_vals = qs_legend
+        tick_labels = string.(qs_legend)
+        if length(tick_vals) > 30
+            keep_mask = [i == 1 || i == length(tick_vals) || tick_vals[i] == 0 || i % 2 == 0 for i in 1:length(tick_vals)]
+            tick_vals = tick_vals[keep_mask]
+            tick_labels = tick_labels[keep_mask]
+        end
+        plot!(p_legend, xticks=(tick_vals, tick_labels))
+
+        l = @layout [grid(1, 2)
+                     c{0.1h}]
+        
+        p_final = plot(p1, p2, p_legend, layout=l, size=(1200, 700), margin=5Plots.mm)
+    end
+    
+    savefig(p_final, filename)
+end
+
+
+function plt_lowest_eigs_winding_single(
+    df,
+    filename,
+    gaps,
+    idop_labels,
+    mu_values,
+    color_dict;
+    log_process::Bool=false,
+    fit_results=nothing,
+    side::Symbol=:pos
+)
+    df_sorted = sort(df, :phason)
+    phasons = df_sorted.phason
+    n_mu = length(mu_values)
+    n_phason = length(phasons)
+
+    Z_pos = zeros(n_phason, n_mu)
+    Z_neg = zeros(n_phason, n_mu)
+
+    eps_log = 1e-12
+
+    for (j, row) in enumerate(eachrow(df_sorted))
+        eigs_p = row.min_pos_eigs
+        if length(eigs_p) == n_mu
+            if log_process
+                Z_pos[j, :] .= [ismissing(x) ? NaN : log10(abs(x) + eps_log) for x in eigs_p]
+            else
+                Z_pos[j, :] .= replace(eigs_p, missing => NaN)
+            end
+        end
+
+        if hasproperty(row, :min_neg_eigs)
+            eigs_n = row.min_neg_eigs
+            if length(eigs_n) == n_mu
+                if log_process
+                    Z_neg[j, :] .= [ismissing(x) ? NaN : log10(abs(x) + eps_log) for x in eigs_n]
+                else
+                    Z_neg[j, :] .= replace(eigs_n, missing => NaN)
+                end
+            end
+        end
+    end
+
+    phason_min, phason_max = minimum(phasons), maximum(phasons)
+    phason_span = phason_max - phason_min
+    rect_height = 0.05 * (phason_span > 0 ? phason_span : 1.0)
+    y_rect_winding = phason_max + 1.0 * rect_height
+    y_rect_idop = y_rect_winding + 1.7 * rect_height
+
+    function add_rects!(p, gaps_subset, y_bottom, label_text)
+        for (mu_start, mu_end, q) in gaps_subset
+            c = get(color_dict, q, RGB(0.8, 0.8, 0.8))
+            plot!(p,
+                [mu_start, mu_end, mu_end, mu_start],
+                [y_bottom, y_bottom, y_bottom + rect_height, y_bottom + rect_height],
+                seriestype=:shape,
+                color=c,
+                linecolor=nothing,
+                linewidth=0.0,
+                label=false,
+                alpha=1.0
+            )
+        end
+        annotate!(p, mu_values[1], y_bottom + 0.5 * rect_height, text(label_text, 8, :black, :right))
+    end
+
+    if side == :neg
+        clims_val = log_process ? (-9, -1) : (-0.1, 0)
+        title_str = log_process ? "Min Neg Eigs (log10|E|)" : "Min Neg Eigs"
+        heat = heatmap(
+            mu_values,
+            phasons,
+            Z_neg;
+            c=:viridis,
+            clims=clims_val,
+            title=title_str,
+            xlabel="Mu",
+            ylabel="Phason",
+            ylim=(phason_min, y_rect_idop + 1.5 * rect_height)
+        )
+    elseif side == :pos
+        clims_val = log_process ? (-9, -1) : (0, 0.1)
+        title_str = log_process ? "Min Pos Eigs (log10|E|)" : "Min Pos Eigs"
+        heat = heatmap(
+            mu_values,
+            phasons,
+            Z_pos;
+            c=:viridis,
+            clims=clims_val,
+            title=title_str,
+            xlabel="Mu",
+            ylabel="Phason",
+            ylim=(phason_min, y_rect_idop + 1.5 * rect_height)
+        )
+    else
+        error("side must be :pos or :neg")
+    end
+
+    add_rects!(heat, gaps, y_rect_winding, "Winding")
+    add_rects!(heat, idop_labels, y_rect_idop, "IDOP")
+
+    if !isnothing(fit_results)
+        for res in fit_results
+            q_val = res.q
+            q_val == 0 && continue
+            theta = hasproperty(res, :theta) ? res.theta : q_val * pi / 2 .* res.phi
+            delta_shift = hasproperty(res, :delta_shift) ? res.delta_shift : mod2pi(res.delta + pi)
+            sine_mu = res.center .+ res.amp .* sin.(theta .+ res.delta)
+            opp_mu = res.center .+ res.amp .* sin.(theta .+ delta_shift)
+            plot!(heat, sine_mu, res.phi; color=RGBA(1.0, 0.0, 0.0, 0.5), linewidth=2.0, label=false)
+            plot!(heat, opp_mu, res.phi; color=RGBA(0.0, 0.0, 1.0, 0.5), linewidth=2.0, label=false)
+        end
+    end
+
+    qs_legend = sort(collect(keys(color_dict)))
+
+    if isempty(qs_legend)
+        savefig(heat, filename)
+        return
+    end
+
+    q_min, q_max = extrema(qs_legend)
+
+    p_legend = plot(
+        xlims=(q_min - 0.5, q_max + 0.5),
+        ylims=(0, 1),
+        framestyle=:box,
+        grid=false,
+        yaxis=false,
+        legend=false,
+        xlabel="Winding Number q",
+        bottom_margin=5Plots.mm,
+        top_margin=0Plots.mm,
+        ticks=:native
     )
 
-    # Left: Positive gap eigenvalues
-    Plots.scatter!(
-        plt[1],
-        mu_all, phason_all;
-        z=pos_gap_eigs_all,
-        markersize=2,
-        markerstrokewidth=0,
-        color=:viridis,
-        xlabel="mu",
-        ylabel="phason",
-        title="Positive Gap Eigenvalues",
-        colorbar=true,
-        xlim=(0.0, 3.0)
-    )
-    # Shaded missing regions
-    Plots.vspan!(plt[1], [0.0, 0.6], color=:gray, alpha=0.3, label="Missing data")
-    Plots.vspan!(plt[1], [1.4, 1.8], color=:gray, alpha=0.3, label="")
-    Plots.vspan!(plt[1], [2.2, 3.0], color=:gray, alpha=0.3, label="")
+    for q in qs_legend
+        c = color_dict[q]
+        plot!(p_legend,
+            Shape([q - 0.5, q + 0.5, q + 0.5, q - 0.5], [0, 0, 1, 1]),
+            color=c,
+            linecolor=nothing
+        )
+    end
 
-    # Right: Negative gap eigenvalues
-    Plots.scatter!(
-        plt[2],
-        mu_all, phason_all;
-        z=neg_gap_eigs_all,
-        markersize=2,
-        markerstrokewidth=0,
-        color=:viridis,
-        xlabel="mu",
-        ylabel="phason",
-        title="Negative Gap Eigenvalues",
-        colorbar=true,
-        xlim=(0.0, 3.0)
-    )
-    # Shaded missing regions
-    Plots.vspan!(plt[2], [0.0, 0.6], color=:gray, alpha=0.3, label="Missing data")
-    Plots.vspan!(plt[2], [1.4, 1.8], color=:gray, alpha=0.3, label="")
-    Plots.vspan!(plt[2], [2.2, 3.0], color=:gray, alpha=0.3, label="")
+    tick_vals = qs_legend
+    tick_labels = string.(qs_legend)
+    if length(tick_vals) > 30
+        keep_mask = [i == 1 || i == length(tick_vals) || tick_vals[i] == 0 || i % 2 == 0 for i in 1:length(tick_vals)]
+        tick_vals = tick_vals[keep_mask]
+        tick_labels = tick_labels[keep_mask]
+    end
+    plot!(p_legend, xticks=(tick_vals, tick_labels))
 
-    Plots.savefig(plt, savepath)
+    layout = @layout [a; b{0.1h}]
+    combined = plot(heat, p_legend, layout=layout, size=(900, 650), margin=5Plots.mm)
+    savefig(combined, filename)
+end
+
+
+function plt_simple_lowest_eigs_heatmap(
+    df,
+    filename,
+    mu_values; 
+    log_process::Bool=false,
+    threshold::Union{Nothing, Float64}=nothing,
+    side::Symbol=:pos,
+    size::Tuple{Int,Int}=(1000,400)
+)
+    df_sorted = sort(df, :phason)
+    phasons = df_sorted.phason
+    n_mu = length(mu_values)
+    n_phason = length(phasons)
+
+    Z = zeros(n_phason, n_mu)
+    eps_log = 1e-12
+
+    for (j, row) in enumerate(eachrow(df_sorted))
+        if side == :pos
+            eigs = row.min_pos_eigs
+        elseif side == :neg
+            eigs = row.min_neg_eigs
+        else
+            error("side must be :pos or :neg")
+        end
+        if log_process
+            for (i, e) in enumerate(eigs)
+                Z[j, i] = log10(abs(e) + eps_log)
+            end
+        else
+            for (i, e) in enumerate(eigs)
+                Z[j, i] = e
+            end
+        end
+    end
+
+    # Check for enough data to plot a 2D heatmap
+    if n_mu < 2 || n_phason < 2
+        @warn "Not enough unique mu or phason values for heatmap: n_mu=$n_mu, n_phason=$n_phason"
+        return
+    end
+
+    # Set color limits and title
+    if log_process
+        clims = (minimum(Z), maximum(Z))
+        title_str = side == :pos ? "Min Pos Eigs (log10|E|)" : "Min Neg Eigs (log10|E|)"
+    else
+        clims = side == :pos ? (0, maximum(Z)) : (minimum(Z), 0)
+        title_str = side == :pos ? "Min Pos Eigs" : "Min Neg Eigs"
+    end
+
+    if threshold !=nothing
+        Z_mask = map(x -> x < threshold ? 1 : 0, Z)
+        cmap = cgrad([RGB(1,1,1), RGB(0,0,0)], 2; categorical=true)
+        heat = heatmap(
+            mu_values, phasons, Z_mask;
+            xlabel="μ", ylabel="phason",
+            clims=(0,1),
+            color=cmap,
+            title=title_str * " (Thresholded at $threshold)",
+            size=size
+        )
+        savefig(heat, filename)
+    else
+        heat = heatmap(
+            mu_values, phasons, Z;
+            # xlabel="μ", ylabel="phason",
+            clims=clims,
+            color=cgrad(:grays, rev=false),
+            # title=title_str,
+            size=size,
+            colorbar=false,
+            framestyle=:box
+        )
+        savefig(heat, filename)
+    end
+
+end
+
+
+function plt_simple_mu_mp_heatmap(
+    df::DataFrame,
+    filename::String,
+    mu_values::Vector{Float64};
+    color=:viridis,
+    mp_tol::Union{Nothing, Float64}=1e-4,
+    size::Tuple{Int,Int}=(800,600)
+)
+    # Sort by phason for a clean y-axis
+    df_sorted = sort(df, :phason)
+    phasons = df_sorted.phason
+    n_mu = length(mu_values)
+    n_phason = nrow(df_sorted)
+
+    if !isnothing(mp_tol)
+        Z = zeros(n_phason, n_mu)
+        for (j, row) in enumerate(eachrow(df_sorted))
+            raw_mp = row.raw_mp
+            disc_mp = map(x -> x < -1 + mp_tol ? -1.0 : 0.0, raw_mp)
+            if length(raw_mp) == n_mu
+                Z[j, :] .= disc_mp
+            else
+                @warn "raw_mp length does not match mu_values length for row $j"
+                Z[j, :] .= NaN
+            end
+        end
+    else
+        Z = zeros(n_phason, n_mu)
+        for (j, row) in enumerate(eachrow(df_sorted))
+            raw_mp = row.raw_mp
+            if length(raw_mp) == n_mu
+                Z[j, :] .= raw_mp
+            else
+                @warn "raw_mp length does not match mu_values length for row $j"
+                Z[j, :] .= NaN
+            end
+        end
+    end
+
+    # Z_exaggerated = map(x -> sign(x) * abs(x)^0.5, Z)
+
+    # Plot
+    heat = heatmap(
+        mu_values, phasons, Z;
+        # xlabel="μ", ylabel="phason",
+        color=color,
+        colorbar=false,
+        # title="raw_mp heatmap",
+        size=size,
+        framestyle=:box
+    )
+    savefig(heat, filename)
 end
 
 

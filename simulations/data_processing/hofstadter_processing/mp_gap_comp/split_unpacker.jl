@@ -41,6 +41,8 @@ function count_zero_runs(vec::AbstractVector{<:Integer})
     return cnt
 end
 
+# Eigenvalue analysis functions moved to processing.jl
+
 function process_tolerance_sweeps(
     df_base::DataFrame,
     output_dir::String,
@@ -105,6 +107,26 @@ function process_tolerance_sweeps(
             # Extract the full vectors from the columns
             mu_vals = g_phi_sorted.mu
             mp_vals = g_phi_sorted.mp
+            eig_vals = g_phi_sorted.eigenvalues
+            # println("type of eig_vals: ", typeof(eig_vals))
+            max_eig = nothing
+            if :eigenvalues in propertynames(g_phi_sorted)
+                mu0_row = findfirst(x -> isapprox(x, 0.0; atol=1e-8), mu_vals)
+                if !isnothing(mu0_row)
+                    mu0_eig = g_phi_sorted.eigenvalues[mu0_row]
+                    if !(ismissing(mu0_eig) || isempty(mu0_eig))
+                        max_eig = maximum(abs.(mu0_eig))
+                    else
+                        @warn "No valid eigenvalues at mu=0.0 for N=$N_val, Delta=$Delta_val, t_n=$t_n_tuple, phi=$phi_val, phason=$phason_val. max_eig will be nothing."
+                    end
+                else
+                    @warn "No mu=0.0 found for N=$N_val, Delta=$Delta_val, t_n=$t_n_tuple, phi=$phi_val, phason=$phason_val. max_eig will be nothing."
+                end
+            else
+                @warn "No eigenvalues column found for N=$N_val, Delta=$Delta_val, t_n=$t_n_tuple, phi=$phi_val, phason=$phason_val. max_eig will be nothing."
+            end
+
+            # println("Max eig: ", max_eig)
             
             # Build Matrix
             n_mu = length(mu_vals)
@@ -116,45 +138,6 @@ function process_tolerance_sweeps(
                 disc_mp_matrix[:, i] .= Int8.(abs.(mp_real .- mp_targ) .<= tol)
             end
 
-            # --- ANALYSIS: Calculate Gaps & J ---
-            # 1. Rationalize phi to find j
-            r = rationalize(phi_val, tol=1e-10) 
-            # r = Rational(phi_val) # Use this to use the entire Float64 range (NB doesn't work for true rationals due to floating point error)
-            j = denominator(r)
-            expected_gaps = min((N_val - 1), Int(floor(j/2)))
-
-            # 2. Count gaps for each tolerance column, respecting mu_c
-            gap_counts = Vector{Int}(undef, n_tols)
-            mu_c_vec = Vector{Float64}(undef, n_tols) # Store mu_c for each tolerance
-
-            for i in 1:n_tols
-                col = disc_mp_matrix[:, i]
-                
-                # Find the LAST index where we have a Majorana (1)
-                last_one_idx = findlast(x -> x == 1, col)
-                
-                if isnothing(last_one_idx)
-                    # Case: No Majoranas found at all in this tolerance
-                    gap_counts[i] = 0
-                    mu_c_vec[i] = mu_vals[1] # Effectively immediately trivial
-                else
-                    # Case: Majoranas exist. 
-                    # mu_c is the start of the final trivial tail (index after last 1)
-                    if last_one_idx < n_mu
-                        mu_c_vec[i] = mu_vals[last_one_idx + 1]
-                    else
-                        mu_c_vec[i] = mu_vals[end] # Majorana exists at the very end
-                    end
-                    
-                    # Count gaps ONLY up to the last Majorana
-                    # We slice the column to exclude the infinite tail
-                    gap_counts[i] = count_zero_runs(col[1:last_one_idx])
-                end
-            end
-
-            # 3. Identify valid indices
-            valid_indices = findall(x -> x == expected_gaps, gap_counts)
-
             # Save BSON
             fname = @sprintf("sweep_phi%.15f.bson", phi_val)
             fpath = joinpath(full_folder_path, fname)
@@ -165,13 +148,7 @@ function process_tolerance_sweeps(
                 :mp_tol_range => mp_tol_range,
                 :disc_mp_matrix => disc_mp_matrix,
                 :params => (N=N_val, Delta=Delta_val, t_n=t_n_tuple, phi=phi_val, phason=phason_val, mp_targ=mp_targ),
-                :analysis => Dict(
-                    :j => j,
-                    :expected_gaps => expected_gaps,
-                    :gap_counts => gap_counts,
-                    :valid_indices => valid_indices,
-                    :mu_c_vec => mu_c_vec # Save mu_c vector
-                )
+                :max_eig => max_eig
             )
             BSON.bson(fpath, data_dict)
             

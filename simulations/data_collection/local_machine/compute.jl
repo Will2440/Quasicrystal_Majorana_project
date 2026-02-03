@@ -85,7 +85,13 @@ function run_selected_solver(
         else
             error("Unsupported precision mode: $(opts.calc_precision). Chose opts.calc_precision = :np")
         end
-    else
+    elseif opts.solver_type == :phason_loop
+		if opts.calc_precision == :np
+			LocalSolv.np_phason_loop_solver(N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, sequence_ids, chunk_size, filepath, opts)
+		else
+            error("Unsupported precision mode: $(opts.calc_precision). Chose opts.calc_precision = :np")
+        end
+	else
         error("Unknown solver type: $(opts.solver_type)")
     end
 

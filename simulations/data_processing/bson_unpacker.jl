@@ -95,6 +95,54 @@ function process_bson_files(folder_path::String)
     return combined_dataframe
 end
 
+function process_bson_files_with_winding(folder_path::String)
+    combined_dataframe = DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        sequence_id = Any[],
+        mp = Float64[],
+        maj_gap = Float64[],
+        ipr = Float64[],
+        loc_len = Float64[],
+        phase_winding = Float64[],
+        eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
+        eigenvectors = Union{Matrix{Float64}, Matrix{BigFloat}, Missing}[]
+    )
+    
+    file_paths = glob("*.bson", folder_path)
+    files_read = 0
+    failed_files = String[]
+
+    @showprogress for file_path in file_paths
+        bson_data = nothing
+        try
+            bson_data = BSON.load(file_path)
+        catch err
+            push!(failed_files, file_path)
+            @warn "Failed to load BSON file (skipping)" file=file_path error=err
+            continue
+        end
+
+        if haskey(bson_data, :results_df)
+            results_df = DataFrame(bson_data[:results_df])
+            append!(combined_dataframe, results_df)
+            files_read += 1
+        else
+            @warn "BSON file missing :results_df key (skipping)" file=file_path
+        end
+    end
+
+    println("number of files read: $files_read / $(length(file_paths))")
+    if !isempty(failed_files)
+        @warn "Some BSON files could not be processed" failed_count=length(failed_files) failed_files=failed_files
+    end
+    
+    return combined_dataframe
+end
+
 
 # ------------------------------
 ## Partitioned processing Functions

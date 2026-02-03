@@ -1,7 +1,7 @@
 """
     file name:   solver.jl
     created:     24/09/2025
-    last edited: 04/11/2025
+    last edited: 17/12/2025
 
     overview:
         This file generates an importable module containing all of the calculations relevant to the analysing Majoranas in the Kitaev chain.
@@ -37,6 +37,7 @@
         - Changed sequence_id to match Tuple{Float64, Float64} format used in sequences defined by phi and phason angle -- NB only for np_generic_solver!
         - Added new function np_seq_scaled_solver to dynamically vary t_n based on the sequence
         - Changed data allocation to more thread-safe version in np_generic_solver ONLY
+        - Added wilson loop calculation function np_calc_wilson_loop_windings (NOT integrated into solvers yet) (NOT tested)
 
 """
 
@@ -58,6 +59,7 @@ struct UserOptions
     calc_ipr::Bool
     calc_mbs_energy_gap::Bool
     calc_loc_len::Bool
+    calc_proj_wind::Bool
     calc_precision::Symbol # :hp or :np
     save_evecs::Symbol # :all_np, :all_hp, :maj_np, :maj_hp or :none
     save_evals::Symbol # :all_np, :all_hp, :maj_np, :maj_hp or :none
@@ -277,6 +279,274 @@ function np_mbs_gap_size(
     gap_size = abs(eigenvalues[middle_index]) + abs(eigenvalues[middle_index + 1])
 
     return gap_size::Float64
+end
+
+# Not integrated / tested
+function np_calc_wilson_loop_windings(
+    N::Int,
+    t_n::Vector{Float64},
+    mu::Float64,
+    Delta::Float64,
+    theta::Float64, 
+    n_phi_steps::Int,
+    gap_indices::Vector{Int}
+)
+    """
+        np_calc_wilson_loop_windings
+
+        Calculates the topological winding number (Chern number) for specified gaps 
+        using the discretized Wilson loop method over a full phason cycle [0, 2π).
+        
+        Arguments:
+        - theta: The slope/frequency of the quasiperiodic sequence (e.g. 1/golden_ratio).
+        - n_phi_steps: Number of discretization steps for the phason angle phi.
+        - gap_indices: Vector of integers indicating the number of filled bands below the gap 
+                    for which to calculate the winding. (e.g. [N÷2] for the central gap).
+        
+        Returns:
+        - Dict{Int, Int}: A dictionary mapping gap_index => winding_number.
+    """
+    # 1. Initialize Wilson Loop Matrices as Identity
+    # We store a separate unitary matrix for each gap index we are tracking
+    wilson_loops = Dict{Int, Matrix{ComplexF64}}()
+    for k in gap_indices
+        wilson_loops[k] = Matrix{ComplexF64}(I, k, k)
+    end
+
+    # Pre-allocate for current and next eigenvectors
+    # We only need to store the eigenvectors, not the values
+    # We need to handle the boundary condition where phi wraps 2π -> 0
+    
+    # Helper to generate sequence on the fly
+    # Standard projection: floor(n*theta + phi)
+    # But for the hopping sequence h_n, we usually use:
+    # h_n = 1 if (n*theta + phi) % 1 < theta else 2 (or similar depending on your convention)
+    # Assuming standard Fibonacci/Sturmian rule:
+    function get_seq(phi_val)
+        seq = Int[]
+        for n in 1:N
+            # Standard projection method for slope theta
+            # val = floor((n+1)*theta + phi_val) - floor(n*theta + phi_val)
+            # This results in 0s and 1s. Map to indices 1 and 2.
+            # Adjust this logic to match your specific sequence generation exactly!
+            
+            # Using the standard "slope" definition often used in these papers:
+            chi = ((n * theta) + phi_val) % 1.0
+            # If theta is inverse golden ratio, this generates the Fibonacci word
+            val = chi < theta ? 0 : 1 
+            push!(seq, val + 1) # 1-based indexing for t_n
+        end
+        return seq
+    end
+
+    # Initial Step (phi = 0)
+    phi_0 = 0.0
+    seq_0 = get_seq(phi_0)
+    BdG_0 = np_create_bdg_hamiltonian(N, t_n, mu, Delta, seq_0)
+    _, evecs_prev = LinearAlgebra.eigen(Hermitian(BdG_0))
+
+    # Loop over phi steps
+    # We go from 0 to 2π. The last step connects phi_{N-1} back to phi_0.
+    dphi = 2π / n_phi_steps
+    
+    for step in 1:n_phi_steps
+        # Next phi
+        phi_next = step * dphi
+        
+        # If it's the last step, we strictly wrap back to the exact 0-state to close the loop
+        # However, numerically, calculating the state at 2π is safer than assuming evecs_0
+        # because of gauge freedom (random phase factors in diagonalization).
+        # We calculate H(2π) which is H(0), but the solver might give different phase factors.
+        
+        seq_next = get_seq(phi_next)
+        BdG_next = np_create_bdg_hamiltonian(N, t_n, mu, Delta, seq_next)
+        _, evecs_next = LinearAlgebra.eigen(Hermitian(BdG_next))
+
+        # Calculate Overlaps for each requested gap
+        for k in gap_indices
+            # Select occupied subspace (lowest k eigenvectors)
+            # Size: N_sites x k
+            U_prev_sub = view(evecs_prev, :, 1:k)
+            U_next_sub = view(evecs_next, :, 1:k)
+
+            # Overlap Matrix M = U_{i}^dagger * U_{i+1}
+            # Size: k x k
+            M = U_prev_sub' * U_next_sub
+            
+            # Accumulate Wilson Loop: W <- W * M
+            # Note: The order of multiplication follows the path. 
+            # W_total = M_{N-1, N} * ... * M_{0, 1}
+            # So we right-multiply the new overlap.
+            wilson_loops[k] = wilson_loops[k] * M
+        end
+
+        # Update 'prev' for next iteration
+        evecs_prev = evecs_next
+    end
+
+    # Calculate Winding Numbers from the accumulated Unitaries
+    windings = Dict{Int, Int}()
+    for k in gap_indices
+        W = wilson_loops[k]
+        
+        # The winding is the phase of the determinant divided by 2π
+        # Im(ln(det(W))) gives the phase in [-π, π].
+        # However, for a full loop, we need the accumulated phase.
+        # The standard formula for discrete Wilson loop winding is:
+        # sum( Im(ln(eigenvalues(M))) ) over the path? 
+        # No, simpler: The determinant of the product is the product of determinants.
+        # We need to track the branch cut crossings of log(det) during the loop 
+        # OR use the Resta formula.
+        
+        # Robust method: Sum of phases of eigenvalues of the final W matrix?
+        # No, that only gives result mod 1.
+        
+        # To get the integer winding > 1, we strictly need to sum the relative phases 
+        # at each step: sum_i Im ln det (M_{i, i+1}).
+        # But since I implemented the product W, let's use the standard "Log Det" 
+        # assuming the step size dphi is small enough that the phase doesn't jump by 2π.
+        
+        # RE-CALCULATION STRATEGY:
+        # We cannot just take log(det(W_final)) because that is defined modulo 2π.
+        # We must sum the incremental phases.
+        # Let's re-do the loop logic slightly to sum phases on the fly.
+        # (See revised function below)
+        nothing
+    end
+    
+    # --- REVISED IMPLEMENTATION FOR ROBUST WINDING ---
+    # Reset
+    total_phases = Dict{Int, Float64}()
+    for k in gap_indices; total_phases[k] = 0.0; end
+    
+    # Re-initialize 0 state
+    seq_0 = get_seq(0.0)
+    BdG_0 = np_create_bdg_hamiltonian(N, t_n, mu, Delta, seq_0)
+    _, evecs_prev = LinearAlgebra.eigen(Hermitian(BdG_0))
+    
+    # We need to close the loop explicitly to 2π (which is 0)
+    # But we must compare H(2π) evecs to H(0) evecs.
+    # Since H(2π) == H(0), evecs_final should be evecs_0 * (diagonal phases).
+    # Actually, standard Resta polarization formula:
+    # P = (1/2π) * Im ln [ det( <u0|u1><u1|u2>...<uN|u0> ) ]
+    # This formula works for the polarization (position). 
+    # For the Chern number (winding over a cycle), this formula gives the invariant modulo 1?
+    # No, for a 1D pump, the winding is exactly this integral.
+    
+    # Let's use the "Im ln det" accumulation method which is robust.
+    
+    for step in 1:n_phi_steps
+        phi_next = step * dphi
+        # If last step, ensure we generate exactly the same Hamiltonian as step 0
+        # to close the loop physically, even if numerically slightly off.
+        if step == n_phi_steps
+            phi_next = 0.0 
+        end
+
+        seq_next = get_seq(phi_next)
+        BdG_next = np_create_bdg_hamiltonian(N, t_n, mu, Delta, seq_next)
+        _, evecs_next = LinearAlgebra.eigen(Hermitian(BdG_next))
+        
+        # If step == n_phi_steps, evecs_next corresponds to phi=0.
+        # However, the solver might return different arbitrary phases than evecs_prev(initial).
+        # The overlap <u_prev | u_next> handles this gauge mismatch automatically.
+
+        for k in gap_indices
+            U_prev_sub = view(evecs_prev, :, 1:k)
+            U_next_sub = view(evecs_next, :, 1:k)
+            
+            # Overlap M
+            M = U_prev_sub' * U_next_sub
+            
+            # Incremental phase
+            det_M = det(M)
+            phase_step = imag(log(det_M))
+            
+            # Accumulate
+            total_phases[k] += phase_step
+        end
+        
+        evecs_prev = evecs_next
+    end
+
+    # Final integer winding
+    results = Dict{Int, Int}()
+    for k in gap_indices
+        # W = TotalPhase / 2π
+        # Round to nearest integer to handle numerical noise
+        results[k] = round(Int, total_phases[k] / (2π))
+    end
+
+    return results
+end
+
+# # Projector winding calculation
+mutable struct ProjectorWindingAccumulator
+    U_prev::Union{Matrix{ComplexF64}, Nothing}
+    U_initial::Union{Matrix{ComplexF64}, Nothing} # New field
+    phase_sum::Float64
+end
+
+function ProjectorWindingAccumulator()
+    ProjectorWindingAccumulator(nothing, nothing, 0.0)
+end
+
+## Over all eigenstates (symmetric about 0 energy)
+# function np_calc_projector_winding!(
+#     acc::ProjectorWindingAccumulator,
+#     evals::Vector{Float64},
+#     evecs::Matrix{ComplexF64}
+# )
+#     Q = np_flattened_Q(evals, evecs)
+
+#     if acc.Q_prev !== nothing
+#         U = acc.Q_prev * Q
+#         acc.phase_sum += angle(det(U))
+#     end
+
+#     acc.Q_prev = Q
+#     return nothing
+# end
+
+## Over only negative energy states (occupied subspace)
+function np_calc_projector_winding!(
+    acc::ProjectorWindingAccumulator,
+    evals::Vector{Float64},
+    evecs::Matrix{ComplexF64}
+)
+    # 1. Identify occupied subspace (Negative energy states)
+    occ_indices = findall(x -> x < -1e-8, evals)
+    U_occ = evecs[:, occ_indices]
+
+    # Store Initial State on first run
+    if acc.U_initial === nothing
+        acc.U_initial = U_occ
+    end
+
+    if acc.U_prev !== nothing
+        # Check dimensions
+        if size(acc.U_prev, 2) == size(U_occ, 2)
+            # Overlap: <u_prev | u_curr>
+            M = acc.U_prev' * U_occ
+            acc.phase_sum += angle(det(M))
+        end
+    end
+
+    # Store current as previous
+    acc.U_prev = U_occ
+    return nothing
+end
+
+function np_close_projector_loop!(acc::ProjectorWindingAccumulator)
+    # Calculate overlap between the LAST state (U_prev) and the INITIAL state
+    if acc.U_prev !== nothing && acc.U_initial !== nothing
+        if size(acc.U_prev, 2) == size(acc.U_initial, 2)
+            # Overlap: <u_last | u_initial>
+            M = acc.U_prev' * acc.U_initial 
+            acc.phase_sum += angle(det(M))
+        end
+    end
+    return nothing
 end
 
 ###########################################################
@@ -1047,6 +1317,139 @@ function hp_mu_rho_restricted_solver(
         if nrow(results_df) > 0
             chunk_idx = thread_local_chunks[thread_id]
             file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            @save file_name results_df
+        end
+    end
+
+    return nothing
+end
+
+function np_phason_loop_solver(
+    N_range::Vector{Int},
+    t_n_range::Vector{Vector{Float64}},
+    mu_range::Vector{Float64},
+    Delta_range::Vector{Float64},
+    sequences::Vector{Vector{Int}},
+    sequence_name::String,
+    sequence_ids::Vector{Tuple{Float64,Float64}},
+    chunk_size::Int,
+    filepath::String,
+    opts::UserOptions
+)
+    # allocate by maxthreadid (not nthreads) to cover all possible thread ids
+    maxid = Threads.maxthreadid()
+    thread_local_results = [DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        sequence_id = Tuple{Float64,Float64}[],
+        mp = Float64[],
+        maj_gap = Float64[],
+        ipr = Float64[],
+        loc_len = Float64[],
+        eigenvalues = Union{Vector{Float64}, Missing}[],
+        eigenvectors = Union{Matrix{Float64}, Missing}[],
+        winding_phase = Union{Float64, Missing}[]
+    ) for _ in 1:maxid]
+    thread_local_chunks = ones(Int, maxid)
+
+    # Thread over parameters only; loop over sequences internally
+    @showprogress Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range)))
+        tid = Threads.threadid()
+        results_df = thread_local_results[tid]
+        
+        # Extract parameters
+        N = N_range[idx[1]]
+        t_n = t_n_range[idx[2]]
+        mu = mu_range[idx[3]]
+        Delta = Delta_range[idx[4]]
+
+        # Initialize accumulator for this specific parameter set (phason cycle)
+        # Only needed if calc_proj_wind is true
+        winding_acc = opts.calc_proj_wind ? ProjectorWindingAccumulator() : nothing
+
+        # Inner loop over all sequences for these specific parameters
+        # Designed for sequence groups with fixed slope and full period of phason
+        for (seq_idx, sequence) in enumerate(sequences)
+            sequence_id = sequence_ids[seq_idx]
+            chunk_idx = thread_local_chunks[tid]
+
+            # Solve
+            truncated_sequence = Vector(sequence[1:N])
+            BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
+            evals, evecs = LinearAlgebra.eigen(Hermitian(BdG))
+
+            mp = opts.calc_mp ? np_calc_maj_mp(evecs) : NaN
+            gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
+            ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
+            loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+
+            current_winding = missing
+            if opts.calc_proj_wind
+                np_calc_projector_winding!(winding_acc, evals, evecs)
+                # CHECK: Is this the last sequence? If so, close the loop.
+                if seq_idx == length(sequences)
+                    np_close_projector_loop!(winding_acc)
+                end
+                
+                current_winding = winding_acc.phase_sum
+            end
+
+            # Save
+            eigenvalues_to_save = begin
+                if opts.save_evals == :all_np
+                    evals
+                elseif opts.save_evals == :maj_np
+                    mid = length(evals) ÷ 2
+                    evals[mid:mid+1]
+                else
+                    missing
+                end
+            end
+            eigenvectors_to_save = begin
+                if opts.save_evecs == :all_np
+                    evecs
+                elseif opts.save_evecs == :maj_np
+                    mid = size(evecs, 2) ÷ 2
+                    evecs[:, mid:mid+1]
+                else
+                    missing
+                end
+            end
+
+            push!(results_df, (
+                N = N,
+                t_n = t_n,
+                mu = mu,
+                Delta = Delta,
+                sequence_name = sequence_name,
+                sequence_id = sequence_id,
+                mp = mp,
+                maj_gap = gap,
+                ipr = ipr,
+                loc_len = loc_len,
+                eigenvalues = eigenvalues_to_save,
+                eigenvectors = eigenvectors_to_save,
+                winding_phase = current_winding
+            ))
+
+            if nrow(results_df) >= chunk_size
+                file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).bson"
+                @save file_name results_df
+                empty!(results_df)
+                thread_local_chunks[tid] = chunk_idx + 1
+            end
+        end
+    end
+
+    # Flush remaining per-thread results
+    for tid in 1:maxid
+        results_df = thread_local_results[tid]
+        if nrow(results_df) > 0
+            chunk_idx = thread_local_chunks[tid]
+            file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).bson"
             @save file_name results_df
         end
     end

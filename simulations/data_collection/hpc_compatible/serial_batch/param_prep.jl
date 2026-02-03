@@ -19,26 +19,27 @@ project_root = @__DIR__
 # =====================================================================
 
 sequences_dir = joinpath(project_root, "batch_params", "sequences")
-sequence_bson_file ="hof_style_slopes_N100_phason_0.0-101-1.0_nbins1000_npb1.bson"# "sturmian_slopes_K100_L4_balanced_bins5000_mpb2_r50_comp-false_tailoption-0_N500_phason_0.0-1-0.0_const_mapping.bson"
+sequence_bson_file ="hof_style_slopes_N500_phason_0.0-101-1.0_nbins100_npb1.bson"# "sturmian_slopes_K100_L4_balanced_bins5000_mpb2_r50_comp-false_tailoption-0_N500_phason_0.0-1-0.0_const_mapping.bson"
 
 # Sequence selection
-sequence_selection = :target_phason  # :all, :user_range, :target_slope, :target_phason
+sequence_selection = :target_phason  # :all, :user_range, :target_slope, :target_phason, :slope_range
 sequence_indices = 100:100  # only used if :user_range
-target_slope = 0.5  # only used if :target_slope
-slope_tolerance = 0.01  # only used if :target_slope
+target_slope = 2/(1 + sqrt(5))  # only used if :target_slope
+slope_tolerance = 0.001  # only used if :target_slope
+target_slope_range = (0.0, 0.5)  # only used if :slope_range
 target_phason = 0.0  # only used if :target_phason
 phason_tolerance = 0.0001  # only used if :target_phason
 
 # Parameter ranges (full vectors; will be chunked per row)
-Ns      = [100]                       # Vector{Int} (not chunked)
-mus_all = collect(range(-3.0, 3.0, 1201)) #vcat(collect(range(0.6, 1.4, 401)), collect(range(1.8, 2.2, 201)))  # Vector{Float64}
-Deltas  = [0.05]#, 0.01, 0.05, 0.1, 0.2]             # Vector{Float64}
+Ns      = [500]                       # Vector{Int} (not chunked)
+mus_all = collect(range(0.0, 3.0, 601)) #vcat(collect(range(0.6, 1.4, 401)), collect(range(1.8, 2.2, 201)))  # Vector{Float64}
+Deltas  = [0.05] #, 0.1, 0.2, 0.3, 0.4, 0.5]             # Vector{Float64}
 t1s     = [1.0]                  # Vector{Float64}
-t2s     = [1.5]#, 2.0, 2.5]             # Vector{Float64}
+t2s     = [1.5] #, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]             # Vector{Float64}
 t3s     = Float64[]                   # Vector{Float64} (empty = no t3)
 
 # Chunking parameters for each
-mu_vals_per_row = 301
+mu_vals_per_row = 301 #ceil(Int, length(mus_all)/30)
 mu_split_mode = :contiguous  # :contiguous or :roundrobin
 delta_vals_per_row = length(Deltas)
 delta_split_mode = :contiguous
@@ -48,8 +49,8 @@ t2_vals_per_row = length(t2s)
 t2_split_mode = :contiguous
 t3_vals_per_row = 1  # if t3s not empty
 t3_split_mode = :contiguous
-slope_vals_per_row = 2
-phason_vals_per_row = 1
+slope_vals_per_row = 1
+phason_vals_per_row = 101
 phason_split_mode = :contiguous  # :contiguous or :roundrobin
 sequences_per_row = slope_vals_per_row * phason_vals_per_row
 
@@ -121,6 +122,8 @@ elseif sequence_selection == :user_range
     seq_sel_info = "_r$(sequence_indices[1])-$(sequence_indices[end])"
 elseif sequence_selection == :target_slope
     seq_sel_info = "_s$(target_slope)_t$(slope_tolerance)"
+elseif sequence_selection == :slope_range
+    seq_sel_info = "_srange$(target_slope_range[1])-$(target_slope_range[2])"
 elseif sequence_selection == :target_phason
     seq_sel_info = "_p$(target_phason)_t$(phason_tolerance)"
 else
@@ -172,13 +175,18 @@ elseif sequence_selection == :target_slope
     seqs = seqs[mask]
     phis = phis[mask]
     phasons = phasons[mask]
+elseif sequence_selection == :slope_range
+    mask = (phis .>= target_slope_range[1]) .& (phis .<= target_slope_range[2])
+    seqs = seqs[mask]
+    phis = phis[mask]
+    phasons = phasons[mask]
 elseif sequence_selection == :target_phason
     mask = abs.(phasons .- target_phason) .<= phason_tolerance
     seqs = seqs[mask]
     phis = phis[mask]
     phasons = phasons[mask]
 elseif sequence_selection != :all
-    error("Unknown sequence_selection: $sequence_selection. Use :all, :user_range, :target_slope, or :target_phason")
+    error("Unknown sequence_selection: $sequence_selection. Use :all, :user_range, :target_slope, :slope_range, or :target_phason")
 end
 
 # =====================================================================
@@ -312,6 +320,8 @@ if sequence_selection == :user_range
     println("Using filtering: $(sequence_selection) with indices: $(sequence_indices)")
 elseif sequence_selection == :target_slope
     println("Using filtering: $(sequence_selection) with target slope: $(target_slope) ± $(slope_tolerance)")
+elseif sequence_selection == :slope_range
+    println("Using filtering: $(sequence_selection) with range: [$(target_slope_range[1]), $(target_slope_range[2])]")
 elseif sequence_selection == :target_phason
     println("Using filtering: $(sequence_selection) with target phason: $(target_phason) ± $(phason_tolerance)")
 elseif sequence_selection == :all

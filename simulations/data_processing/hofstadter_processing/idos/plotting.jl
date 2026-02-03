@@ -1046,6 +1046,7 @@ function plt_qled_coloured_gaps_energy_vs_phi(
     return plt
 end
 
+
 function plt_coloured_gaps_q_optionality(
     df::DataFrame,
     savepath::String;
@@ -1062,6 +1063,8 @@ function plt_coloured_gaps_q_optionality(
     normalise_energy::Bool = false,
     norm_tol::Real = 1e-6,
     line_width::Int = 4,
+    plt_xlims::Union{Tuple{Real,Real},Nothing}=nothing,
+    plt_ylims::Union{Tuple{Real,Real},Nothing}=nothing,
     fixed_values...
 )
     # approx-aware filtering on row-level context columns
@@ -1081,41 +1084,12 @@ function plt_coloured_gaps_q_optionality(
         error("No gaps match the specified fixed values.")
     end
 
-    # # Collect gaps
-    # lows  = Float64[]; highs = Float64[]; phis = Float64[]
-    # ps    = Int[];     qs    = Int[]
-    # pq_set = Set{Tuple{Int,Int}}()
-    # q_to_ps = Dict{Int, Vector{Int}}()
-
-    # for row in eachrow(filtered_rows)
-    #     gls = getproperty(row, :gap_labels)
-    #     (gls === nothing || isempty(gls)) && continue
-    #     phi = Float64(row.phi)
-    #     for g in gls
-    #         p = Int(g.p); q = Int(g.q)
-    #         if p_range !== nothing && !(p in p_range); continue; end
-    #         if q_max   !== nothing && abs(q) > q_max; continue; end
-    #         push!(lows,  Float64(g.E_low))
-    #         push!(highs, Float64(g.E_high))
-    #         push!(phis,  phi)
-    #         push!(ps,    p)
-    #         push!(qs,    q)
-    #         push!(pq_set, (p,q))
-    #         q_to_ps[q] = get(q_to_ps, q, Int[])
-    #         if !(p in q_to_ps[q])
-    #             push!(q_to_ps[q], p)
-    #         end
-    #     end
-    # end
-
-    # isempty(lows) && error("No gaps remain after filtering.")
-
     # Collect gaps
     lows  = Float64[]; highs = Float64[]; phis = Float64[]
     ps    = Int[];     qs    = Int[]
-    pq_set = Set{Tuple{Int,Int}}()
     q_to_ps = Dict{Int, Vector{Int}}()
-
+    SC_GAP_Q = 9999
+    
     row_idx = 0
     for row in eachrow(filtered_rows)
         row_idx += 1
@@ -1127,23 +1101,26 @@ function plt_coloured_gaps_q_optionality(
             p = Int(g.p); q = Int(g.q)
             if p_range !== nothing && !(p in p_range); continue; end
             if q_max   !== nothing && abs(q) > q_max; continue; end
+            
             push!(lows,  normalise_energy ? norm_map(Float64(g.E_low))  : Float64(g.E_low))
             push!(highs, normalise_energy ? norm_map(Float64(g.E_high)) : Float64(g.E_high))
             push!(phis,  phi)
             push!(ps,    p)
             push!(qs,    q)
-            push!(pq_set, (p,q))
-            q_to_ps[q] = get(q_to_ps, q, Int[])
-            if !(p in q_to_ps[q])
-                push!(q_to_ps[q], p)
+            
+            # Track p for q (excluding sentinel) for color generation
+            if q != SC_GAP_Q
+                q_to_ps[q] = get(q_to_ps, q, Int[])
+                if !(p in q_to_ps[q])
+                    push!(q_to_ps[q], p)
+                end
             end
         end
     end
 
     isempty(lows) && error("No gaps remain after filtering.")
 
-
-    # Keys for coloring: either q or |q|
+    # --- Color Generation Logic (Reverted to Discrete) ---
     key_list = Int[]
     if colour_mode in [:qled_p, :qled_notp]
         key_list = sort(collect(keys(q_to_ps)))
@@ -1167,24 +1144,8 @@ function plt_coloured_gaps_q_optionality(
         cgrad(:viridis, n_key; categorical=true).colors
     end
 
-    # Map each (p,q) -> colour and legend label
+    # Map each (p,q) -> colour
     pq_to_color = Dict{Tuple{Int,Int}, Colorant}()
-    pq_to_label = Dict{Tuple{Int,Int}, String}()
-
-    # Helper: legend text per mode
-    legend_label(p,q) = begin
-        if colour_mode == :qled_p
-            "(p=$p, q=$q)"
-        elseif colour_mode == :qled_notp
-            "q = $q"
-        elseif colour_mode == :absq_p
-            "(p=$p, q=$q, |q|=$(abs(q)))"
-        elseif colour_mode == :absq_notp
-            "|q| = $(abs(q))"
-        else
-            ""
-        end
-    end
 
     for (ki, key) in enumerate(key_list)
         if colour_mode in [:qled_p, :absq_p]
@@ -1210,37 +1171,28 @@ function plt_coloured_gaps_q_optionality(
                 color_p = RGB(HSV(base_hsv.h, s_new, v_new))
 
                 if colour_mode == :qled_p
-                    pq = (pval, key)
-                    pq_to_color[pq] = color_p
-                    pq_to_label[pq] = legend_label(pq[1], pq[2])
+                    pq_to_color[(pval, key)] = color_p
                 else # :absq_p
                     for q in keys(q_to_ps)
                         if abs(q) == key && pval in q_to_ps[q]
-                            pq = (pval, q)
-                            pq_to_color[pq] = color_p
-                            pq_to_label[pq] = legend_label(pq[1], pq[2])
+                            pq_to_color[(pval, q)] = color_p
                         end
                     end
                 end
             end
-
         else
             # :qled_notp or :absq_notp – same colour for all p in key
             color_key = base_colors[ki]
             if colour_mode == :qled_notp
                 q = key
                 for p in q_to_ps[q]
-                    pq = (p, q)
-                    pq_to_color[pq] = color_key
-                    pq_to_label[pq] = legend_label(pq[1], pq[2])  # label is "q = q"
+                    pq_to_color[(p, q)] = color_key
                 end
             else # :absq_notp
                 for q in keys(q_to_ps)
                     if abs(q) == key
                         for p in q_to_ps[q]
-                            pq = (p, q)
-                            pq_to_color[pq] = color_key
-                            pq_to_label[pq] = legend_label(pq[1], pq[2])  # label is "|q| = |q|"
+                            pq_to_color[(p, q)] = color_key
                         end
                     end
                 end
@@ -1248,14 +1200,27 @@ function plt_coloured_gaps_q_optionality(
         end
     end
 
-    # Axes ranges
-    xmin = minimum(lows); xmax = maximum(highs)
-    ymin = minimum(phis); ymax = maximum(phis)
-    x_span = xmax - xmin; x_span = x_span == 0 ? 1.0 : x_span
-    y_span = ymax - ymin; y_span = y_span == 0 ? 1.0 : y_span
+    # --- Plotting ---
+    # Axes limits with padding
+    pad_pc = 0.05
+    if isnothing(plt_xlims)
 
-    # Band half-height in φ units
-    h = max(1e-6, 0.5 * min(0.02 * y_span, (0.9 * y_span) / max(1, length(unique(phis)))))
+        xmin = minimum(lows); xmax = maximum(highs)
+        x_span = xmax - xmin; x_span = x_span == 0 ? 1.0 : x_span
+        x_pad = pad_pc * x_span
+        xlims = (xmin - x_pad, xmax + x_pad)
+    else
+        xlims = plt_xlims
+    end
+
+    if isnothing(plt_ylims)
+        ymin = minimum(phis); ymax = maximum(phis)
+        y_span = ymax - ymin; y_span = y_span == 0 ? 1.0 : y_span
+        y_pad = pad_pc * y_span
+        ylims = (ymin - y_pad, ymax + y_pad)
+    else
+        ylims = plt_ylims
+    end
 
     # Default titles by mode if not provided
     default_title = begin
@@ -1272,100 +1237,85 @@ function plt_coloured_gaps_q_optionality(
         end
     end
 
+    # Setup Plot with Box style, NO Legend, NO Colorbar
+    # plt = plot(
+    #     xlabel = xlabel,
+    #     ylabel = ylabel,
+    #     legend = false,          # No legend
+    #     grid   = false,
+    #     size   = (1000,800),
+    #     # title  = isnothing(title) ? default_title : title,
+    #     framestyle = :box,       # Enclosed axes
+    #     colorbar = false,        # No colorbar
+    #     xlims = xlims,
+    #     ylims = ylims,
+    #     right_margin = 5Plots.mm,
+    # )
+
     plt = plot(
-        xlabel = xlabel,
-        ylabel = ylabel,
-        legend = :outerright,
-        grid   = true,
-        size   = size,
-        title  = isnothing(title) ? default_title : title,
+        xlabel = "",              # No x-label
+        ylabel = "",              # No y-label
+        title = "",               # No title
+        legend = false,           # No legend
+        grid = false,             # No grid
+        size = (800,800),
+        framestyle = :none,       # No frame/box (removes axis box)
+        colorbar = false,         # No colorbar
+        xlims = xlims,
+        ylims = ylims,
+        # right_margin = 5Plots.mm,
+        ticks = false,            # No tick marks or numbers
+        axis = false              # No axis lines
     )
 
-    # Group indices by (p,q) so we can plot each group once for legend
-    # Manual grouping to avoid dependency if not wanted:
+    # Group indices by (p,q) for efficient plotting
     pq_to_indices = Dict{Tuple{Int,Int}, Vector{Int}}()
     for i in eachindex(lows)
         pq = (ps[i], qs[i])
         push!(get!(pq_to_indices, pq, Int[]), i)
     end
 
-    # # Plot each group with one legend entry
-    # if colour_mode == :absq_notp
-    #     # Only one legend entry per |q|
-    #     absq_to_indices = Dict{Int, Vector{Int}}()
-    #     absq_to_color = Dict{Int, Colorant}()
-    #     for (pq, idxs) in pq_to_indices
-    #         absq = abs(pq[2])
-    #         absq_to_indices[absq] = get(absq_to_indices, absq, Int[])
-    #         append!(absq_to_indices[absq], idxs)
-    #         absq_to_color[absq] = pq_to_color[pq]
-    #     end
-    #     for absq in sort(collect(keys(absq_to_indices)))
-    #         idxs = absq_to_indices[absq]
-    #         col = absq_to_color[absq]
-    #         lbl = "|q| = $absq"
-    #         xs_all = Float64[]; ys_all = Float64[]
-    #         for i in idxs
-    #             phi = phis[i]
-    #             append!(xs_all, [lows[i], highs[i], NaN])
-    #             append!(ys_all, [phi,      phi,      NaN])
-    #         end
-    #         plot!(plt, xs_all, ys_all;
-    #             seriestype=:path,
-    #             linecolor=col,
-    #             linewidth=4,
-    #             label=lbl)
-    #     end
-    # # Plot each group with one legend entry
-    if colour_mode in (:qled_notp, :absq_notp)
-        key_to_indices = Dict{Int, Vector{Int}}()
-        key_to_color   = Dict{Int, Colorant}()
-
-        for (pq, idxs) in pq_to_indices
-            key = colour_mode == :qled_notp ? pq[2] : abs(pq[2])
-            push!(get!(key_to_indices, key, Int[]), idxs...)
-            key_to_color[key] = pq_to_color[pq]
-        end
-
-        for key in sort(collect(keys(key_to_indices)))
-            idxs = key_to_indices[key]
-            col  = key_to_color[key]
-            lbl  = colour_mode == :qled_notp ? "q = $key" : "|q| = $key"
-
-            xs_all = Float64[]; ys_all = Float64[]
-            for i in idxs
-                phi = phis[i]
-                append!(xs_all, [lows[i], highs[i], NaN])
-                append!(ys_all, [phi, phi, NaN])
-            end
-
-            plot!(plt, xs_all, ys_all; seriestype=:path, linecolor=col, linewidth=line_width, label=lbl)
-        end
-    else
-        # Default: one legend entry per (p,q)
-        for (pq, idxs) in sort(collect(pq_to_indices); by=x->(x[1][2], x[1][1]))
-            col = pq_to_color[pq]
-            lbl = pq_to_label[pq]
-            xs_all = Float64[]; ys_all = Float64[]
-            for i in idxs
-                phi = phis[i]
-                append!(xs_all, [lows[i], highs[i], NaN])
-                append!(ys_all, [phi,      phi,      NaN])
-            end
-            plot!(plt, xs_all, ys_all;
-                seriestype=:path,
-                linecolor=col,
-                linewidth=4,
-                label=lbl)
+    # 1. Plot Sentinel Gaps (Grey)
+    sentinel_indices = Int[]
+    for (pq, idxs) in pq_to_indices
+        if pq[2] == SC_GAP_Q
+            append!(sentinel_indices, idxs)
         end
     end
+    if !isempty(sentinel_indices)
+        xs_sent = Float64[]; ys_sent = Float64[]
+        for i in sentinel_indices
+            append!(xs_sent, [lows[i], highs[i], NaN])
+            append!(ys_sent, [phis[i], phis[i], NaN])
+        end
+        plot!(plt, xs_sent, ys_sent; 
+              seriestype=:path, 
+              linecolor=:lightgrey, 
+              linewidth=line_width, 
+              label=false)
+    end
 
-    # Add some right margin for legend
-    plot!(plt, xlim=(xmin, xmax + 0.10 * x_span))
+    # 2. Plot Physical Gaps (Coloured by discrete map)
+    for (pq, idxs) in pq_to_indices
+        if pq[2] == SC_GAP_Q; continue; end
+        
+        col = get(pq_to_color, pq, :black) # Fallback
+        xs = Float64[]; ys = Float64[]
+        for i in idxs
+            append!(xs, [lows[i], highs[i], NaN])
+            append!(ys, [phis[i], phis[i], NaN])
+        end
+        plot!(plt, xs, ys; 
+              seriestype=:path, 
+              linecolor=col, 
+              linewidth=line_width, 
+              label=false)
+    end
 
     savefig(plt, savepath)
     return plt
 end
+
 
 # helper to build per-row energy normalisers that match compute_eigs_norm! scaling
 function make_energy_normaliser(row; eigs_col::Symbol=:eigenvalues, tol::Real=1e-6)
@@ -1409,5 +1359,331 @@ function make_energy_normaliser(row; eigs_col::Symbol=:eigenvalues, tol::Real=1e
         end
     end
 end
+
+
+
+
+
+# function plt_phason_indep_spectrum_comparison(
+#     df::DataFrame,
+#     eigs_col::Symbol,
+#     indep_spectrum::Vector{Float64},
+#     filepath::String;
+#     slope=nothing, Delta=nothing, t_n=nothing, mu=nothing
+# )
+#     # Ensure phason column exists
+#     if !("phason" in names(df))
+#         if !(:phason in propertynames(df))
+#             @warn "DataFrame must have 'phason' column for comparison plot."
+#             return
+#         end
+#     end
+
+#     # Extract data
+#     phasons = df.phason
+#     raw_eigs = df[!, eigs_col]
+
+#     # Flatten for scattering: x = phason, y = eig
+#     xs = Float64[]
+#     ys = Float64[]
+#     for (p, evs) in zip(phasons, raw_eigs)
+#         if ismissing(evs); continue; end
+#         for e in evs
+#             push!(xs, p)
+#             push!(ys, e)
+#         end
+#     end
+
+#     if isempty(xs)
+#         @warn "No valid data points found for plotting."
+#         return
+#     end
+
+#     # 1. Unified Y-Limits
+#     # We compute the global min/max to ensure both plots share the EXACT same scale
+#     ymin_raw, ymax_raw = isempty(ys) ? (0.0, 1.0) : extrema(ys)
+#     ymin_filt, ymax_filt = isempty(indep_spectrum) ? (ymin_raw, ymax_raw) : extrema(indep_spectrum)
+    
+#     global_min = min(ymin_raw, ymin_filt)
+#     global_max = max(ymax_raw, ymax_filt)
+#     span = global_max - global_min
+#     if span == 0; span = 1.0; end
+    
+#     # Add a small padding (e.g., 2%)
+#     pad = 0.02 * span
+#     shared_ylims = (global_min - pad, global_max + pad)
+
+#     # Plot 1: Raw Spectrum vs Phason (Left Panel)
+#     p1 = scatter(
+#         xs, ys,
+#         markersize=1.5,
+#         markercolor=:black,
+#         markeralpha=0.6,
+#         markerstrokewidth=0,
+#         legend=false,
+#         xlabel="Phason",
+#         ylabel="Energy",
+#         title="Raw",
+#         ylims=shared_ylims,
+#         right_margin = -3Plots.mm, # Negative margin to bring plots closer
+#         framestyle=:box
+#     )
+
+#     # Plot 2: Independent Spectrum (Right Panel)
+#     p2 = scatter(
+#         fill(0.5, length(indep_spectrum)), 
+#         indep_spectrum,
+#         markersize=1.5,
+#         markercolor=:red,
+#         markerstrokewidth=0,
+#         xlims=(0, 1),
+#         # xticks=[],     # Hide x-ticks
+#         ylims=shared_ylims,
+#         xlabel="Filtered",
+#         y_mirror=true, # Put Y-axis labels/ticks on the right side
+#         grid=true,     # Keep grid for alignment
+#         xgrid=false,   # Remove vertical grid lines for cleaner look
+#         label=false,
+#         title="Filtered",
+#         framestyle=:box, # Maintains the right-hand axis line
+#         left_margin = -3Plots.mm # Negative margin to touch the left plot
+#     )
+    
+#     # Layout: Main plot gets more space
+#     l = @layout [a{0.85w} b{0.15w}]
+    
+#     # Title construction
+#     title_parts = String[]
+#     if !isnothing(slope); push!(title_parts, "Slope: $(slope)"); end
+#     if !isnothing(mu);    push!(title_parts, "mu: $(mu)"); end
+#     plot_title = join(title_parts, ", ")
+    
+#     final_plt = plot(p1, p2, layout=l, 
+#         size=(1000, 600), 
+#         plot_title=plot_title,
+#         top_margin=5Plots.mm
+#     )
+
+#     savefig(final_plt, filepath)
+# end
+
+function plt_phason_indep_spectrum_comparison(
+    df::DataFrame,
+    eigs_col::Symbol,
+    indep_spectrum::Vector{Float64},
+    filepath::String;
+    slope=nothing, Delta=nothing, t_n=nothing, mu=nothing
+)
+    # Ensure phason column exists
+    if !("phason" in names(df))
+        if !(:phason in propertynames(df))
+            @warn "DataFrame must have 'phason' column for comparison plot."
+            return
+        end
+    end
+
+    # Extract data
+    phasons = df.phason
+    raw_eigs = df[!, eigs_col]
+
+    # Flatten for scattering: x = phason, y = eig
+    xs = Float64[]
+    ys = Float64[]
+    for (p, evs) in zip(phasons, raw_eigs)
+        if ismissing(evs); continue; end
+        for e in evs
+            push!(xs, p)
+            push!(ys, e)
+        end
+    end
+
+    if isempty(xs)
+        @warn "No valid data points found for plotting."
+        return
+    end
+
+    # 1. Unified Y-Limits
+    # We compute the global min/max to ensure both plots share the EXACT same scale
+    ymin_raw, ymax_raw = isempty(ys) ? (0.0, 1.0) : extrema(ys)
+    ymin_filt, ymax_filt = isempty(indep_spectrum) ? (ymin_raw, ymax_raw) : extrema(indep_spectrum)
+    
+    global_min = min(ymin_raw, ymin_filt)
+    global_max = max(ymax_raw, ymax_filt)
+    span = global_max - global_min
+    if span == 0; span = 1.0; end
+    
+    # Add a small padding (e.g., 2%)
+    pad = 0.02 * span
+    shared_ylims = (global_min - pad, global_max + pad)
+
+    # Plot 1: Raw Spectrum vs Phason (Left Panel)
+    p1 = scatter(
+        xs, ys,
+        markersize=1.5,
+        markercolor=:black,
+        markeralpha=0.6,
+        markerstrokewidth=0,
+        legend=false,
+        xlabel="Phason",
+        ylabel="Energy",
+        title="Raw",
+        ylims=shared_ylims,
+        right_margin = -3Plots.mm, # Negative margin to bring plots closer
+        framestyle=:box
+    )
+
+    # Plot 2: Independent Spectrum (Middle Panel) - Strip/Barcode
+    p2 = scatter(
+        fill(0.5, length(indep_spectrum)), 
+        indep_spectrum,
+        markersize=1.5,
+        markercolor=:red,
+        markerstrokewidth=0,
+        xlims=(0, 1),
+        yticks=[],     # Hide y-ticks (they are on the left of p1)
+        ylims=shared_ylims,
+        xlabel="Filtered",
+        grid=true,     # Keep grid for alignment
+        xgrid=false,   # Remove vertical grid lines for cleaner look
+        label=false,
+        title="Filtered",
+        framestyle=:box,
+        left_margin = -3Plots.mm,  # Negative margin to touch p1
+        right_margin = -3Plots.mm  # Negative margin to touch p3
+    )
+
+    # Plot 3: DOS of Independent Spectrum (Right Panel)
+    p3 = histogram(
+        indep_spectrum,
+        bins=500,
+        orientation=:horizontal, # Energy on Y, Count/DOS on X
+        ylims=shared_ylims,
+        y_mirror=true, # Put Y-axis labels/ticks on the right side
+        label=false,
+        title="DOS",
+        xlabel="Count",
+        color=:gray,
+        alpha=0.8,
+        framestyle=:box,
+        grid=true,
+        xlims=(0.0, 6.0),
+        left_margin = -3Plots.mm # Negative margin to touch p2
+    )
+    
+    # Layout: Raw(70%) | Filtered(10%) | DOS(20%)
+    l = @layout [a{0.7w} b{0.1w} c{0.2w}]
+    
+    # Title construction
+    title_parts = String[]
+    if !isnothing(slope); push!(title_parts, "Slope: $(slope)"); end
+    if !isnothing(mu);    push!(title_parts, "mu: $(mu)"); end
+    plot_title = join(title_parts, ", ")
+    
+    final_plt = plot(p1, p2, p3, layout=l, 
+        size=(1200, 600), 
+        plot_title=plot_title,
+        top_margin=5Plots.mm
+    )
+
+    savefig(final_plt, filepath)
+end
+
+
+
+function plt_eval_projections_vs_phason(
+    df::DataFrame,
+    eigs_col::Symbol,
+    phason_col::Symbol,
+    savepath::AbstractString;
+    mu=nothing,
+    Delta=nothing,
+    t_n=nothing,
+    phi=nothing,
+    lims=nothing,
+    reverse_axes::Bool=false,
+    plt_type::Symbol=:scatter, # :scatter or :line
+    colour=:black,
+    alpha=0.6,
+    size::Tuple{Int,Int}=(800,600)
+)
+    # Extract phason and eigenvalues
+    phasons = df[!, phason_col]
+    eigs_list = df[!, eigs_col]
+
+    # Sort by phason for a clean plot
+    df_sorted = sort(df, phason_col)
+    phasons_sorted = df_sorted[!, phason_col]
+    eigs_sorted = df_sorted[!, eigs_col]
+    n_phason = length(phasons_sorted)
+    n_eigs = length(df_sorted[1, eigs_col])
+
+    # sort matrix for line plot
+    # eig_matrix = [df_sorted[i, eigs_col] for i in 1:n_phason]
+    # eig_matrix = hcat(eig_matrix...)'  # n_phason × n_eigs
+    eig_matrix = zeros(n_phason, n_eigs)
+    for i in 1:n_phason
+        eigvec = df_sorted[i, eigs_col]
+        @assert length(eigvec) == n_eigs "All eigenvalue vectors must have the same length"
+        eig_matrix[i, :] .= eigvec
+    end
+
+    # Handle ylims
+    plot_ylims = lims
+    all_eigs = reduce(vcat, eigs_sorted)
+    if lims == :half
+        plot_ylims = (0.0, 3.0) #maximum(all_eigs))
+    end
+
+    # Prepare plot
+    plt = plot(
+        size=size,
+        legend=false,
+        grid=true,
+        framestyle=:box,
+        # xticks=:none,
+        # yticks=:none,
+    )
+    if plt_type == :scatter
+        for (i, eigs) in enumerate(eigs_sorted)
+            if !reverse_axes
+                plot!(plt, fill(phasons_sorted[i], length(eigs)), eigs, seriestype=:scatter, markersize=0, markerstrokewidth=0.5, color=colour, alpha=alpha)
+            else
+                plot!(plt, eigs, fill(phasons_sorted[i], length(eigs)), seriestype=:scatter, markersize=0, markerstrokewidth=0.5, color=colour, alpha=alpha)
+            end
+        end
+    elseif plt_type == :line
+        if !reverse_axes
+            for j in 1:n_eigs
+                plot!(plt, phasons_sorted, eig_matrix[:, j], label=false, color=colour, alpha=alpha)
+            end
+        else
+            for j in 1:n_eigs
+                plot!(plt, eig_matrix[:, j], phasons_sorted, label=false, color=colour, alpha=alpha)
+            end
+        end
+    else
+        error("Invalid plt_type: $plt_type (use :scatter or :line)")
+    end
+
+    if !reverse_axes
+        # xlabel!(plt, "Phason")
+        # ylabel!(plt, "Eigenvalue")
+        if plot_ylims !== nothing
+            ylims!(plt, plot_ylims)
+        end
+    else
+        # xlabel!(plt, "Eigenvalue")
+        # ylabel!(plt, "Phason")
+        if plot_ylims !== nothing
+            xlims!(plt, plot_ylims)
+        end
+    end
+
+    # title!(plt, "Eigenvalues vs Phason (fixed φ = $(phi), μ = $(mu), Δ = $(Delta), tₙ = $(t_n))")
+    savefig(plt, savepath)
+    println("Saved eigenvalue vs phason plot to: $savepath")
+end
+
+
 
 end # module IDOSPlotting

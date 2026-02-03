@@ -7,3 +7,5 @@ final_data_masters_thesis/
 # *.log
 raw_data/
 results/
+*.csv
+*.dat

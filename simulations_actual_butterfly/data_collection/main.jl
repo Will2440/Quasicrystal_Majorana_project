@@ -1,5 +1,21 @@
+using Logging
 
 include("functions.jl")
+
+# Set logger level from JULIA_LOG_LEVEL environment variable, default to Info if not set
+level_str = uppercase(get(ENV, "JULIA_LOG_LEVEL", "info"))
+level = if level_str == "DEBUG"
+    Logging.Debug
+elseif level_str == "INFO"
+    Logging.Info
+elseif level_str == "WARN"
+    Logging.Warn
+elseif level_str == "ERROR"
+    Logging.Error
+else
+    Logging.Info  # fallback
+end
+global_logger(ConsoleLogger(stderr, level))
 
 using .HofstadterButterfly
 using CairoMakie
@@ -60,10 +76,12 @@ function generate_custom_colormap(
         span = idx_pos_high - idx_pos1
         for (j,i) in enumerate(idx_pos1+1:idx_pos_high-1)
             t = j / span
-            if t < 0.5
-                cmap[i] = lerp(RGB(1.0,0.0,0.0), col_pos_light, t/0.5)
+            if t < 0.33
+                cmap[i] = lerp(RGB(1.0,0.0,0.0), col_pos_light, t/0.33)
+            elseif t < 0.66
+                cmap[i] = lerp(col_pos_light, col_pos_yell, (t-0.33)/0.33)
             else
-                cmap[i] = lerp(col_pos_light, col_pos_yell, (t-0.5)/0.5)
+                cmap[i] = lerp(col_pos_yell, col_pos_high, (t-0.66)/0.34)
             end
         end
     end
@@ -79,6 +97,8 @@ function generate_custom_colormap(
 
     return cmap
 end
+
+
 
 
 
@@ -229,7 +249,7 @@ end
 # ------------------------------------------
 # Data Collection
 # ------------------------------------------
-collect_data = true  # Set to false to load existing data
+collect_data = false  # Set to false to load existing data
 
 qmax = 500
 
@@ -239,11 +259,13 @@ if collect_data
     data = Dict("flux" => flux, "gmin" => gmin, "gmax" => gmax, "glabel" => glabel)
     BSON.bson(joinpath(data_path, "gap_coloured_butterfly_diophantine_qmax$(qmax).bson"), data)
 else
+    @info "Loading precomputed gap-coloured butterfly data for qmax = $qmax"
     data = BSON.load(joinpath(data_path, "gap_coloured_butterfly_diophantine_qmax$(qmax).bson"))
     flux = data["flux"]
     gmin = data["gmin"]
     gmax = data["gmax"]
     glabel = data["glabel"]
+    @info "Data loaded."
 end
 # ------------------------------------------
 
@@ -267,6 +289,7 @@ flux_filt = flux[mask]
 gmin_filt = gmin[mask]
 gmax_filt = gmax[mask]
 glabel_filt = glabel[mask]
+@info "finished filtering data: retained $(length(flux_filt)) out of $(length(flux)) gaps."
 # ------------------------------------------
 
 
@@ -274,37 +297,50 @@ glabel_filt = glabel[mask]
 # ------------------------------------------
 # Plotting unormalised colormap
 # ------------------------------------------
-f = CairoMakie.Figure(resolution=(1000, 800))
-ax = CairoMakie.Axis(f[1,1], 
-    xlabel="Energy E", 
-    ylabel="Flux α = p/q", 
-    title="Hofstadter Butterfly (Irrational Approximants q > $min_q, |σ_xy| ≤ $max_label)",
-    backgroundcolor=:white
-)
+# f = CairoMakie.Figure(resolution=(1000, 800))
+# ax = CairoMakie.Axis(f[1,1], 
+#     xlabel="Energy E", 
+#     ylabel="Flux α = p/q", 
+#     title="Hofstadter Butterfly (Irrational Approximants q > $min_q, |σ_xy| ≤ $max_label)",
+#     backgroundcolor=:white
+# )
 
-# 3. Calculate color limits explicitly
-clims = (-max_label, max_label)
-custom_cmap = generate_custom_colormap(-max_label, max_label)
+# f = CairoMakie.Figure(resolution=(800, 800))
+# ax = CairoMakie.Axis(f[1,1], 
+#     xlabel="",                    # No x-label
+#     ylabel="",                    # No y-label
+#     title="",                     # No title
+#     xticksvisible=false,          # No x-ticks
+#     yticksvisible=false,          # No y-ticks
+#     xticklabelsvisible=false,     # No x-tick labels
+#     yticklabelsvisible=false,     # No y-tick labels
+#     spinewidth=0,                 # No frame/spines
+#     backgroundcolor=:white
+# )
 
-# Use linesegments to plot horizontal bars (swapped axes: energy on x, flux on y)
-points = Vector{Point2f}()
-colors = Vector{Int}()
-for i in 1:length(flux_filt)
-    push!(points, Point2f(gmin_filt[i], flux_filt[i]))
-    push!(points, Point2f(gmax_filt[i], flux_filt[i]))
-    push!(colors, glabel_filt[i])
-    push!(colors, glabel_filt[i])  # Repeat color for each segment
-end
+# # 3. Calculate color limits explicitly
+# clims = (-max_label, max_label)
+# custom_cmap = generate_custom_colormap(-max_label, max_label)
 
-CairoMakie.linesegments!(ax, points; 
-    color=colors, 
-    colormap=custom_cmap, 
-    colorrange=clims, 
-    linewidth=3.0 
-)
+# # Use linesegments to plot horizontal bars (swapped axes: energy on x, flux on y)
+# points = Vector{Point2f}()
+# colors = Vector{Int}()
+# for i in 1:length(flux_filt)
+#     push!(points, Point2f(gmin_filt[i], flux_filt[i]))
+#     push!(points, Point2f(gmax_filt[i], flux_filt[i]))
+#     push!(colors, glabel_filt[i])
+#     push!(colors, glabel_filt[i])  # Repeat color for each segment
+# end
 
-CairoMakie.Colorbar(f[1, 2], colormap=custom_cmap, colorrange=clims, label="Hall Conductance σ_xy")
-CairoMakie.save(joinpath(actual_butterfly_results_path, "gap_coloured_butterfly_diophantine_qmax$(qmax)_ratqs$(min_q)_maxlabel$(max_label).png"), f)
+# CairoMakie.linesegments!(ax, points; 
+#     color=colors, 
+#     colormap=custom_cmap, 
+#     colorrange=clims, 
+#     linewidth=3.0 
+# )
+
+# CairoMakie.Colorbar(f[1, 2], colormap=custom_cmap, colorrange=clims, label="Hall Conductance σ_xy")
+# CairoMakie.save(joinpath(actual_butterfly_results_path, "gap_recoloured_butterfly_diophantine_qmax$(qmax)_ratqs$(min_q)_maxlabel$(max_label).png"), f)
 
 
 
@@ -332,22 +368,39 @@ for uf in unique_fluxes
         norm_gmax_filt[indices] = (local_gmaxs .- local_min) ./ (local_max - local_min) .* 2 .- 1
     end
 end
+@info "finished normalising energy ranges per flux."
 
 
 # ------------------------------------------
 # Plotting normalised colormap
 # ------------------------------------------
-f = CairoMakie.Figure(resolution=(1000, 800))
+# f = CairoMakie.Figure(resolution=(1000, 800))
+# ax = CairoMakie.Axis(f[1,1], 
+#     xlabel="Normalised Energy E", 
+#     ylabel="Flux α = p/q", 
+#     title="Hofstadter Butterfly (Irrational Approximants q > $min_q, |σ_xy| ≤ $max_label)",
+#     backgroundcolor=:white
+# )
+
+f = CairoMakie.Figure(resolution=(800, 800))
 ax = CairoMakie.Axis(f[1,1], 
-    xlabel="Normalised Energy E", 
-    ylabel="Flux α = p/q", 
-    title="Hofstadter Butterfly (Irrational Approximants q > $min_q, |σ_xy| ≤ $max_label)",
-    backgroundcolor=:white
+    xlabel="",                    # No x-label
+    ylabel="",                    # No y-label
+    title="",                     # No title
+    xticksvisible=false,          # No x-ticks
+    yticksvisible=false,          # No y-ticks
+    xticklabelsvisible=false,     # No x-tick labels
+    yticklabelsvisible=false,     # No y-tick labels
+    spinewidth=0,                 # No frame/spines
+    backgroundcolor=:white,
+    xgridvisible=false,
+    ygridvisible=false
 )
 
 # Calculate color limits explicitly
 clims = (-max_label, max_label)
 custom_cmap = generate_custom_colormap(-max_label, max_label)
+@info "generated custom colormap for normalised plot."
 
 # Use linesegments with normalized energies
 points_norm = Vector{Point2f}()
@@ -366,5 +419,5 @@ CairoMakie.linesegments!(ax, points_norm;
     linewidth=3.0 
 )
 
-CairoMakie.Colorbar(f[1, 2], colormap=custom_cmap, colorrange=clims, label="Hall Conductance σ_xy")
-CairoMakie.save(joinpath(actual_butterfly_results_path, "gap_coloured_butterfly_diophantine_normalised_qmax$(qmax)_ratqs$(min_q)_maxlabel$(max_label).png"), f)
+# CairoMakie.Colorbar(f[1, 2], colormap=custom_cmap, colorrange=clims, label="Hall Conductance σ_xy")
+CairoMakie.save(joinpath(actual_butterfly_results_path, "gap_recoloured_butterfly_diophantine_normalised_qmax$(qmax)_ratqs$(min_q)_maxlabel$(max_label).png"), f)

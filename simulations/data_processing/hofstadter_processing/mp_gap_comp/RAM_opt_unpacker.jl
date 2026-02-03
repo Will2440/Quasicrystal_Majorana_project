@@ -90,7 +90,7 @@ function unpack_and_slice(
 
         bytes = Base.summarysize(slice_df)
         row_cnt = nrow(slice_df)
-        println("Group $i/$total_groups -> rows=$row_cnt, size≈$(round(bytes/1e6, digits=2)) MB (N=$N_val, Delta=$Delta_val, t_n=$t_n_vec, phi=$phi_val, phason=$phason_val)")
+        @info "Group $i/$total_groups -> rows=$row_cnt, size≈$(round(bytes/1e6, digits=2)) MB (N=$N_val, Delta=$Delta_val, t_n=$t_n_vec, phi=$phi_val, phason=$phason_val)"
 
         t_n_tuple = Tuple(t_n_vec)
         fname = @sprintf("slice_N%d_Delta%.5f_t1%.5f_t2%.5f_phi%.5f_phason%.5f.bson",

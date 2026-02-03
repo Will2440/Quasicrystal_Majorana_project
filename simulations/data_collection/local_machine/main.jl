@@ -67,13 +67,13 @@ thue_morse_sequence = SeqGen.thue_morse_SeqGen(N_seq_seed)
 plastic_sequence = SeqGen.plastic_SeqGen(N_seq_seed)
 
 ## Recover Sturmian sequences from .bson
-seq_file = "sturmian_slopes_K8_L3_balanced_bins500_mpb1_r50_comp-false_N1000_phason_0.0-1-0.0_algorithmic_generalised.bson"
+seq_file = "hof_style_slopes_N1000_target_0.61803_tol_0.001_phason_0.0-101-1.0_nbins1000_npb1.bson"
 indir = joinpath(project_root, "..", "auxilliary", "sturm_seq_sets", seq_file)
 indir = normpath(indir)
 sturm_df = SeqGen.load_sturmian_seq_bson(indir)
 
 ## N Range (even single value must be a Vector type)
-N_range = [200]
+N_range = [110]
 
 ## t_n Range (combine any number of different hopping ranges)
 t1_range = collect(range(1.0, 1.0, 1))
@@ -83,10 +83,10 @@ t_ranges = [t1_range, t2_range]#, t3_range]
 t_combinations = ParamCombGen.t_ranges_combs(t_ranges)
 
 ## mu Range (even single calue must be a Vector type)
-mu_range = [0.0]#, 1.0, 2.0, 3.0] #collect(range(0.0, 3.0, length=151))
+mu_range = collect(range(0.0, 3.0, length=301))
 
 ## Delta Range (even single value must be a vector type)
-Delta_range = [0.0]#, 0.1, 0.2] #collect(range(0.1, 2.0, 20))
+Delta_range = [0.05]#, 0.1, 0.2] #collect(range(0.1, 2.0, 20))
 
 
 ## Sequence Chunking (use this to generate sequence samples which can be compared)
@@ -152,10 +152,11 @@ function get_user_options()
         false,   # calc_ipr
         false,   # calc_mbs_energy_gap
         false,   # calc_loc_len
+        true,    # calc_proj_wind
         :np,     # calc_precision: :hp, :np
         :none, # save_evecs: :all_np, :all_hp, :maj_np, :maj_hp, :none
         :all_np, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
-        :generic # solver_type: :generic, seq_scaled, :mu_loop, :N_loop, :restricted
+        :phason_loop # solver_type: :generic, seq_scaled, :mu_loop, :N_loop, :restricted, :phason_loop
     )
 end
 

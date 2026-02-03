@@ -402,10 +402,116 @@ end
 
 
 
+# ##############################################################################
+# ## Usage 4: Generate slopes as in Hofstadter butterfly (all reduced p/q, plus irrationals)
+# ##############################################################################
+# N = 1000
+# map_to = (2,1)
+# qmin, qmax = 2, N
+
+# # 1. Threaded generation of all reduced rationals p/q in [0,1]
+# slopes = Float64[]
+# slope_lock = SpinLock()
+# slope_prog = Progress(qmax - qmin + 1; desc="Generating slopes")
+
+# @threads for q in qmin:qmax
+#     local_chunk = Float64[]
+#     sizehint!(local_chunk, q)
+#     for p in 1:q-1
+#         if gcd(p, q) == 1
+#             push!(local_chunk, p / q)
+#         end
+#     end
+#     lock(slope_lock)
+#     append!(slopes, local_chunk)
+#     next!(slope_prog)
+#     unlock(slope_lock)
+# end
+
+# push!(slopes, 0.0, 1.0)
+# sort!(slopes)
+# unique!(slopes)
+
+# phason_angle_range = collect(0.0:0.01:1.0)
+# n_phi = length(slopes)
+# n_phason = length(phason_angle_range)
+# slot_count = n_phi * n_phason
+
+# seqs = Vector{Vector{Int}}(undef, slot_count)
+# phis = Vector{Float64}(undef, slot_count)
+# phasons = Vector{Float64}(undef, slot_count)
+
+# seq_lock = SpinLock()
+# seq_prog = Progress(n_phason; desc="Cut-and-project")
+
+# @threads for ip in 1:n_phason
+#     phason = phason_angle_range[ip]
+#     base = (ip - 1) * n_phi
+#     for is in 1:n_phi
+#         idx = base + is
+#         phi = slopes[is]
+#         seqs[idx] = cut_and_project_sequence(N, phi; gamma=phason, map_to=map_to)
+#         phis[idx] = phi
+#         phasons[idx] = phason
+#     end
+#     lock(seq_lock); next!(seq_prog); unlock(seq_lock)
+# end
+# println("Generated $(length(phis)) slopes.")
+
+# ## Rebalance distribution (keep ≤ nperbin unique φ per bin, retain all phasons per φ)
+# nbins = 500
+# nperbin = 1
+# edges = range(0.0, stop=1.0, length=nbins + 1)
+
+# unique_phis = unique(phis)
+# phi_to_inds = Dict{Float64, Vector{Int}}()
+# for (i, phi) in enumerate(phis)
+#     push!(get!(phi_to_inds, phi, Int[]), i)
+# end
+
+# bin_idx = clamp.(searchsortedfirst.(Ref(edges), unique_phis) .- 1, 1, nbins)
+# selected_unique = falses(length(unique_phis))
+# counts = zeros(Int, nbins)
+# for i in eachindex(unique_phis)
+#     b = bin_idx[i]
+#     if counts[b] < nperbin
+#         selected_unique[i] = true
+#         counts[b] += 1
+#     end
+# end
+
+# selected_phis = unique_phis[selected_unique]
+# selected_inds = reduce(vcat, [phi_to_inds[phi] for phi in selected_phis])
+# phis = phis[selected_inds]
+# seqs = seqs[selected_inds]
+# phasons = phasons[selected_inds]
+# println("Rebalanced to $(length(selected_phis)) unique slopes -> $(length(phis)) sequences across $(length(phason_angle_range)) phasons (nbins=$nbins, nperbin=$nperbin).")
+
+# println("Plotting distribution of generated slopes...")
+# plt = histogram(
+#     phis;
+#     bins = nbins,
+#     xlabel = "Slope φ",
+#     ylabel = "Count",
+#     title = "Density distribution of generated slopes (N=$N)",
+#     legend = false,
+#     normalize = false
+# )
+# savefig_dir = joinpath(@__DIR__, "slope_density_dists")
+# isdir(savefig_dir) || mkpath(savefig_dir)
+# savefig(plt, joinpath(savefig_dir, "hof_style_slopes_N$(N)_slope_distribution.png"))
+
+# println("Saving $(length(phis)) phis, $(length(seqs)) sequences...")
+# outdir = joinpath(@__DIR__, "sturm_seq_sets")
+# outfile = joinpath(outdir, "hof_style_slopes_N$(N)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_nbins$(nbins)_npb$(nperbin).bson")
+# @save outfile phis seqs phasons
+# println("Saved $(length(phis)) phis, $(length(seqs)) sequences to ", outfile)
+# ##############################################################################
+
 ##############################################################################
 ## Usage 4: Generate slopes as in Hofstadter butterfly (all reduced p/q, plus irrationals)
 ##############################################################################
-N = 100
+N = 1000
 map_to = (2,1)
 qmin, qmax = 2, N
 
@@ -432,11 +538,50 @@ push!(slopes, 0.0, 1.0)
 sort!(slopes)
 unique!(slopes)
 
-phason_angle_range = collect(0.0:0.01:1.0)
+println("Initially generated $(length(slopes)) slopes.")
+
+## Rebalance distribution EARLY to save RAM
+## (keep ≤ nperbin unique φ per bin, retain all phasons per φ)
+nbins = 1000
+nperbin = 1
+edges = range(0.0, stop=1.0, length=nbins + 1)
+
+bin_idx = clamp.(searchsortedfirst.(Ref(edges), slopes) .- 1, 1, nbins)
+selected_unique = falses(length(slopes))
+counts = zeros(Int, nbins)
+for i in eachindex(slopes)
+    b = bin_idx[i]
+    if counts[b] < nperbin
+        selected_unique[i] = true
+        counts[b] += 1
+    end
+end
+
+slopes = slopes[selected_unique]
+println("Rebalanced to $(length(slopes)) unique slopes (nbins=$nbins, nperbin=$nperbin).")
+
+## Optional: Filter for target slope
+target_slope = 2/(1 + sqrt(5)) # Set to a Float64 (e.g. 1/phi) to enable filtering, or nothing to disable
+slope_tol = 0.001
+
+if !isnothing(target_slope)
+    filter!(s -> abs(s - target_slope) <= slope_tol, slopes)
+    println("Filtered to $(length(slopes)) slopes within tolerance $slope_tol of target $target_slope.")
+    if isempty(slopes)
+        @warn "No slopes remained after filtering for target $target_slope with tolerance $slope_tol."
+    end
+end
+
+## Overwrite to define literal slope
+# slopes = [0.6180048661800487]
+slopes = [target_slope]
+
+phason_angle_range = [0.0] #collect(0.0:0.01:1.0)
 n_phi = length(slopes)
 n_phason = length(phason_angle_range)
 slot_count = n_phi * n_phason
 
+println("Allocating space for $slot_count sequences...")
 seqs = Vector{Vector{Int}}(undef, slot_count)
 phis = Vector{Float64}(undef, slot_count)
 phasons = Vector{Float64}(undef, slot_count)
@@ -456,54 +601,29 @@ seq_prog = Progress(n_phason; desc="Cut-and-project")
     end
     lock(seq_lock); next!(seq_prog); unlock(seq_lock)
 end
-println("Generated $(length(phis)) slopes.")
+println("Generated $(length(phis)) sequences across $(length(phason_angle_range)) phasons.")
 
-## Rebalance distribution (keep ≤ nperbin unique φ per bin, retain all phasons per φ)
-nbins = 1000
-nperbin = 1
-edges = range(0.0, stop=1.0, length=nbins + 1)
-
-unique_phis = unique(phis)
-phi_to_inds = Dict{Float64, Vector{Int}}()
-for (i, phi) in enumerate(phis)
-    push!(get!(phi_to_inds, phi, Int[]), i)
-end
-
-bin_idx = clamp.(searchsortedfirst.(Ref(edges), unique_phis) .- 1, 1, nbins)
-selected_unique = falses(length(unique_phis))
-counts = zeros(Int, nbins)
-for i in eachindex(unique_phis)
-    b = bin_idx[i]
-    if counts[b] < nperbin
-        selected_unique[i] = true
-        counts[b] += 1
-    end
-end
-
-selected_phis = unique_phis[selected_unique]
-selected_inds = reduce(vcat, [phi_to_inds[phi] for phi in selected_phis])
-phis = phis[selected_inds]
-seqs = seqs[selected_inds]
-phasons = phasons[selected_inds]
-println("Rebalanced to $(length(selected_phis)) unique slopes -> $(length(phis)) sequences across $(length(phason_angle_range)) phasons (nbins=$nbins, nperbin=$nperbin).")
-
-println("Plotting distribution of generated slopes...")
-plt = histogram(
-    phis;
-    bins = nbins,
-    xlabel = "Slope φ",
-    ylabel = "Count",
-    title = "Density distribution of generated slopes (N=$N)",
-    legend = false,
-    normalize = false
-)
-savefig_dir = joinpath(@__DIR__, "slope_density_dists")
-isdir(savefig_dir) || mkpath(savefig_dir)
-savefig(plt, joinpath(savefig_dir, "hof_style_slopes_N$(N)_slope_distribution.png"))
+# println("Plotting distribution of generated slopes...")
+# plt = histogram(
+#     slopes;
+#     bins = nbins,
+#     xlabel = "Slope φ",
+#     ylabel = "Count",
+#     title = "Density distribution of generated slopes (N=$N)",
+#     legend = false,
+#     normalize = false
+# )
+# savefig_dir = joinpath(@__DIR__, "slope_density_dists")
+# isdir(savefig_dir) || mkpath(savefig_dir)
+# savefig(plt, joinpath(savefig_dir, "hof_style_slopes_N$(N)_slope_distribution.png"))
 
 println("Saving $(length(phis)) phis, $(length(seqs)) sequences...")
 outdir = joinpath(@__DIR__, "sturm_seq_sets")
-outfile = joinpath(outdir, "hof_style_slopes_N$(N)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_nbins$(nbins)_npb$(nperbin).bson")
+if target_slope !== nothing
+    outfile = joinpath(outdir, "hof_style_slopes_N$(N)_target_$(round(target_slope, digits=5))_tol_$(slope_tol)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_nbins$(nbins)_npb$(nperbin).bson")
+else
+    outfile = joinpath(outdir, "hof_style_slopes_N$(N)_phason_$(phason_angle_range[1])-$(length(phason_angle_range))-$(phason_angle_range[end])_nbins$(nbins)_npb$(nperbin).bson")
+end
 @save outfile phis seqs phasons
 println("Saved $(length(phis)) phis, $(length(seqs)) sequences to ", outfile)
 ##############################################################################
