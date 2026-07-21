@@ -50,7 +50,8 @@ using LinearAlgebra
 # using SparseArrays
 using Base.Threads
 using DataFrames
-using BSON: @save, @load
+# using BSON: @save, @load
+using JLD2: @save, @load
 using ProgressMeter
 
 
@@ -60,6 +61,9 @@ struct UserOptions
     calc_mbs_energy_gap::Bool
     calc_loc_len::Bool
     calc_proj_wind::Bool
+    calc_spec_func::Bool
+    spec_eta::Float64
+    spec_omega_range::Vector{Float64}
     calc_precision::Symbol # :hp or :np
     save_evecs::Symbol # :all_np, :all_hp, :maj_np, :maj_hp or :none
     save_evals::Symbol # :all_np, :all_hp, :maj_np, :maj_hp or :none
@@ -142,6 +146,39 @@ function np_create_bdg_hamiltonian(
     return BdG
 end
 
+
+function build_operators_block_basis(
+    N::Int
+)
+    """
+    Build position and chiral operators for BLOCK basis BdG Hamiltonian.
+    Block basis ordering: (c_1, c_2, ..., c_N, c_1†, c_2†, ..., c_N†)
+    
+    X = diag(1, 2, ..., N, 1, 2, ..., N)  - position operator
+    Γ = [0   I_N]  - chiral symmetry operator (particle-hole exchange)
+        [I_N  0 ]
+    """
+    dim = 2 * N
+    
+    # Position operator X: diagonal with site indices
+    xvec = zeros(Float64, dim)
+    for i in 1:N
+        xvec[i] = i        # particle at site i
+        xvec[N + i] = i    # hole at site i
+    end
+    X = Diagonal(xvec)
+    
+    # Chiral symmetry Γ: block off-diagonal structure
+    # Top-right block: I_N, Bottom-left block: I_N
+    Gamma = spzeros(Float64, dim, dim)
+    for i in 1:N
+        Gamma[i, N + i] = 1.0      # particle to hole
+        Gamma[N + i, i] = 1.0      # hole to particle
+    end
+    
+    return X, Gamma
+end
+
 ###########################################################
 ################### Sec 2: Calculations ###################
 ###########################################################
@@ -152,16 +189,19 @@ function hp_calc_maj_mp(
     num_rows = size(eigenvectors, 1)
     N = num_rows ÷ 2
     middle_state_index = N
+    middle_plus_one_state_index = N + 1
 
-    u = eigenvectors[1:N, middle_state_index]
-    v = eigenvectors[(N+1):2N, middle_state_index]
+    u_mid = eigenvectors[1:N, middle_state_index]
+    v_mid = eigenvectors[(N+1):2N, middle_state_index]
+    u_mpo = eigenvectors[1:N, middle_plus_one_state_index]
+    v_mpo = eigenvectors[(N+1):2N, middle_plus_one_state_index]
 
-    numerator_L = BigFloat(sum(u[i] * conj(v[i]) + v[i] * conj(u[i]) for i in 1:(N÷2)))
-    denominator_L = BigFloat(sum(abs2(u[i]) + abs2(v[i]) for i in 1:(N÷2)))
+    numerator_L = BigFloat(sum(u_mid[i] * conj(v_mid[i]) + v_mid[i] * conj(u_mid[i]) for i in 1:(N÷2)))
+    denominator_L = BigFloat(sum(abs2(u_mid[i]) + abs2(v_mid[i]) for i in 1:(N÷2)))
     MP_L = numerator_L / denominator_L
 
-    numerator_R = BigFloat(sum(u[i] * conj(v[i]) + v[i] * conj(u[i]) for i in ((N÷2)+1):N))
-    denominator_R = BigFloat(sum(abs2(u[i]) + abs2(v[i]) for i in ((N÷2)+1):N))
+    numerator_R = BigFloat(sum(u_mpo[i] * conj(v_mpo[i]) + v_mpo[i] * conj(u_mpo[i]) for i in ((N÷2)+1):N))
+    denominator_R = BigFloat(sum(abs2(u_mpo[i]) + abs2(v_mpo[i]) for i in ((N÷2)+1):N))
     MP_R = numerator_R / denominator_R
 
     overall_MP = MP_L * MP_R
@@ -176,16 +216,18 @@ function np_calc_maj_mp(
     num_rows = size(eigenvectors, 1)
     N = num_rows ÷ 2
     middle_state_index = N
+    middle_plus_one_state_index = N + 1
+    u_mid = eigenvectors[1:N, middle_state_index]
+    v_mid = eigenvectors[(N+1):2N, middle_state_index]
+    u_mpo = eigenvectors[1:N, middle_plus_one_state_index]
+    v_mpo = eigenvectors[(N+1):2N, middle_plus_one_state_index]
 
-    u = eigenvectors[1:N, middle_state_index]
-    v = eigenvectors[(N+1):2N, middle_state_index]
-
-    numerator_L = Float64(sum(u[i] * conj(v[i]) + v[i] * conj(u[i]) for i in 1:(N÷2)))
-    denominator_L = Float64(sum(abs2(u[i]) + abs2(v[i]) for i in 1:(N÷2)))
+    numerator_L = Float64(sum(u_mid[i] * conj(v_mid[i]) + v_mid[i] * conj(u_mid[i]) for i in 1:(N÷2)))
+    denominator_L = Float64(sum(abs2(u_mid[i]) + abs2(v_mid[i]) for i in 1:(N÷2)))
     MP_L = numerator_L / denominator_L
 
-    numerator_R = Float64(sum(u[i] * conj(v[i]) + v[i] * conj(u[i]) for i in ((N÷2)+1):N))
-    denominator_R = Float64(sum(abs2(u[i]) + abs2(v[i]) for i in ((N÷2)+1):N))
+    numerator_R = Float64(sum(u_mpo[i] * conj(v_mpo[i]) + v_mpo[i] * conj(u_mpo[i]) for i in ((N÷2)+1):N))
+    denominator_R = Float64(sum(abs2(u_mpo[i]) + abs2(v_mpo[i]) for i in ((N÷2)+1):N))
     MP_R = numerator_R / denominator_R
 
     overall_MP = MP_L * MP_R
@@ -281,7 +323,83 @@ function np_mbs_gap_size(
     return gap_size::Float64
 end
 
+function hp_calc_spec_func(
+    eigenvalues::Vector{BigFloat},
+    eigenvectors::Matrix{Complex{BigFloat}},
+    eta::Float64,
+    omega_range::Vector{Float64}
+)
+    N_sites = size(eigenvectors, 1) ÷ 2
+    N_states = length(eigenvalues)
+    num_omegas = length(omega_range)
+    
+    spectral_values = zeros(Float64, N_sites, num_omegas)
+    vecs_sq = abs2.(eigenvectors)
+    big_eta = BigFloat(eta)
+    
+    for j in 1:num_omegas
+        z = BigFloat(omega_range[j]) + im * big_eta
+        for site_idx in 1:N_sites
+            G_ii_particle = zero(Complex{BigFloat})
+            G_ii_hole = zero(Complex{BigFloat})
+            for k in 1:N_states
+                val = 1.0 / (z - eigenvalues[k])
+                G_ii_particle += vecs_sq[site_idx, k] * val
+                G_ii_hole     += vecs_sq[N_sites + site_idx, k] * val
+            end
+            spectral_values[site_idx, j] = Float64(-imag(G_ii_particle + G_ii_hole) / (2 * π))
+        end
+    end
+    
+    return spectral_values
+end
+
+function np_calc_spec_func(
+    eigenvalues::Vector{Float64},
+    eigenvectors::Matrix{ComplexF64},
+    eta::Float64,
+    omega_range::Vector{Float64}
+)
+    N_sites = size(eigenvectors, 1) ÷ 2
+    N_states = length(eigenvalues)
+    num_omegas = length(omega_range)
+    
+    spectral_values = zeros(Float64, N_sites, num_omegas)
+    vecs_sq = abs2.(eigenvectors)
+    
+    for j in 1:num_omegas
+        z = omega_range[j] + im * eta
+        for site_idx in 1:N_sites
+            G_ii_particle = zero(ComplexF64)
+            G_ii_hole = zero(ComplexF64)
+            for k in 1:N_states
+                val = 1.0 / (z - eigenvalues[k])
+                G_ii_particle += vecs_sq[site_idx, k] * val
+                G_ii_hole     += vecs_sq[N_sites + site_idx, k] * val
+            end
+            spectral_values[site_idx, j] = -imag(G_ii_particle + G_ii_hole) / (2π)
+        end
+    end
+    
+    return spectral_values
+end
+
 # Not integrated / tested
+"""
+    np_calc_wilson_loop_windings
+
+    Calculates the topological winding number (Chern number) for specified gaps 
+    using the discretized Wilson loop method over a full phason cycle [0, 2π).
+    
+    Arguments:
+    - theta: The slope/frequency of the quasiperiodic sequence (e.g. 1/golden_ratio).
+    - n_phi_steps: Number of discretization steps for the phason angle phi.
+    - gap_indices: Vector of integers indicating the number of filled bands below the gap 
+                for which to calculate the winding. (e.g. [N÷2] for the central gap).
+    
+    Returns:
+    - Dict{Int, Int}: A dictionary mapping gap_index => winding_number.
+"""
 function np_calc_wilson_loop_windings(
     N::Int,
     t_n::Vector{Float64},
@@ -291,21 +409,6 @@ function np_calc_wilson_loop_windings(
     n_phi_steps::Int,
     gap_indices::Vector{Int}
 )
-    """
-        np_calc_wilson_loop_windings
-
-        Calculates the topological winding number (Chern number) for specified gaps 
-        using the discretized Wilson loop method over a full phason cycle [0, 2π).
-        
-        Arguments:
-        - theta: The slope/frequency of the quasiperiodic sequence (e.g. 1/golden_ratio).
-        - n_phi_steps: Number of discretization steps for the phason angle phi.
-        - gap_indices: Vector of integers indicating the number of filled bands below the gap 
-                    for which to calculate the winding. (e.g. [N÷2] for the central gap).
-        
-        Returns:
-        - Dict{Int, Int}: A dictionary mapping gap_index => winding_number.
-    """
     # 1. Initialize Wilson Loop Matrices as Identity
     # We store a separate unitary matrix for each gap index we are tracking
     wilson_loops = Dict{Int, Matrix{ComplexF64}}()
@@ -549,10 +652,57 @@ function np_close_projector_loop!(acc::ProjectorWindingAccumulator)
     return nothing
 end
 
+
+function np_calc_specloc_gap(
+    L::Union{SparseMatrixCSC{Float64, Int}, Matrix};
+    m_evals::Int=1,
+    kk_tol::Real=1e-8,
+    kk_maxiter::Int=1000
+)::Float64
+
+    L2_action(x) = L * (L * x) # matrix-free action for L^2. 
+    n = size(L, 1)
+    
+    # Ask KrylovKit for m_evals eigenvalues (:SR = Smallest Real).
+    evals, evecs, info = eigsolve(L2_action, rand(Float64, n), m_evals, :SR; 
+                                  ishermitian=true, tol=kk_tol, maxiter=kk_maxiter)
+    
+    localiser_gap = sqrt(abs(evals[1]))
+    return localiser_gap
+end
+
+function np_calc_specloc_full(
+    L::Union{SparseMatrixCSC{Float64, Int}, Matrix};
+)::Tuple{Float64, Float64, Vector{Float64}}
+
+    # # 1. Unlike 2D, the 1D Kitaev localiser is natively purely real and symmetric!
+    # # No need for the 2Nx2N complex-to-real isomorphism trick.
+    # ldl_fact = ldl(Symmetric(L))
+    
+    # # 2. Extract the diagonal matrix D (.d)
+    # D_diag = ldl_fact.d
+    
+    # # 3. Count the positive and negative entries
+    # n_pos = count(x -> x > 0, D_diag)
+    # n_neg = count(x -> x < 0, D_diag)
+    
+    # # 4. Calculate the invariant (1/2 signature for 1D chiral systems)
+    # winding = (n_pos - n_neg) / 2.0
+
+    vals = eigvals(Matrix(L))
+    sig = count(vals .> 0) - count(vals .< 0)
+
+    winding = sig / 2.0
+
+    localiser_gap = minimum(abs.(vals))
+    
+    return winding, localiser_gap, vals
+end
+
+
 ###########################################################
 ################ Sec 3: Solving Functions #################
 ###########################################################
-
 
 function hp_generic_solver(
     N_range::Vector{Int},
@@ -561,63 +711,35 @@ function hp_generic_solver(
     Delta_range::Vector{Float64},
     sequences::Vector{Vector{Int}},
     sequence_name::String,
+    sequence_ids::Vector{Tuple{Float64,Float64}},
     precision::Int,
     chunk_size::Int,
     filepath::String,
     opts::UserOptions
 )
-    """
-    Notes:
-        - hp_generic_solver iterates over all possible parameter ranges indiscriminately, hence 'generic'.
-        - The use of thread IDs to distribute tasks and data storage should only be used on local machines where such ID-ing is known
-        - This can be used when the optimal loop method is not known or not needed.
-    CAUTION: 
-        - This ProgressMeter @showprogress may not give accurate representation of time remaining if disordered parameter looping results in variation in loop time over runtime.
-        - The chunk_size must be sufficiently small to not exceed the memory allocated to this task (again paying attention to indiscriminate loop orders).
-    """
-
-    # Thread-local data store
-    thread_local_results = Dict(Threads.threadid() => DataFrame(
+    # Allocate by maxthreadid (not nthreads) to cover all possible thread ids
+    maxid = Threads.maxthreadid()
+    thread_local_results = [DataFrame(
         N = Int[],
         t_n = Vector{Float64}[],
         mu = Float64[],
         Delta = Float64[],
         sequence_name = String[],
+        sequence_id = Tuple{Float64,Float64}[],
         mp = Float64[],
         maj_gap = Float64[],
         ipr = Float64[],
         loc_len = Float64[],
+        spectral_function = Union{Matrix{Float64}, Missing}[], # NEW
         eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
-        eigenvectors = Union{Matrix{Float64}, Matrix{BigFloat}, Missing}[]
-    ))
+        eigenvectors = Union{Matrix{Complex{Float64}}, Matrix{Complex{BigFloat}}, Missing}[]
+    ) for _ in 1:maxid]
+    thread_local_chunks = ones(Int, maxid)
 
-    # Thread-local chunk counters
-    thread_local_chunks = Dict(Threads.threadid() => 1)
-
-    # Iterate over parameter combinations in parallel
-    @showprogress Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
-        thread_id = Threads.threadid()
-
-        # Initialize thread-local storage for this thread (if not already initialized)
-        if !haskey(thread_local_results, thread_id)
-            thread_local_results[thread_id] = DataFrame(
-                N = Int[],
-                t_n = Vector{Float64}[],
-                mu = Float64[],
-                Delta = Float64[],
-                sequence_name = String[],
-                mp = Float64[],
-                maj_gap = Float64[],
-                ipr = Float64[],
-                loc_len = Float64[],
-                eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
-                eigenvectors = Union{Vector{Float64}, Vector{BigFloat}, Missing}[]
-            )
-            thread_local_chunks[thread_id] = 1
-        end
-
-        results_df = thread_local_results[thread_id]
-        chunk_idx = thread_local_chunks[thread_id]
+    @showprogress Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
+        tid = Threads.threadid()
+        results_df = thread_local_results[tid]
+        chunk_idx = thread_local_chunks[tid]
 
         # Extract parameters
         N = N_range[idx[1]]
@@ -625,6 +747,7 @@ function hp_generic_solver(
         mu = mu_range[idx[3]]
         Delta = Delta_range[idx[4]]
         sequence = sequences[idx[5]]
+        sequence_id = sequence_ids[idx[5]]
 
         # Perform computations
         truncated_sequence = Vector(sequence[1:N])
@@ -636,6 +759,7 @@ function hp_generic_solver(
         gap = opts.calc_mbs_energy_gap ? hp_mbs_gap_size(evals) : NaN
         ipr = opts.calc_ipr ? hp_calc_maj_ipr(evecs) : NaN
         loc_len = opts.calc_loc_len ? hp_calc_maj_loc_len(evecs) : NaN
+        spec_func = opts.calc_spec_func ? hp_calc_spec_func(evals, evecs, opts.spec_eta, opts.spec_omega_range) : missing # NEW
 
         # Eigenvalue saving options (symbol-based)
         eigenvalues_to_save = begin
@@ -678,29 +802,31 @@ function hp_generic_solver(
             mu = mu,
             Delta = Delta,
             sequence_name = sequence_name,
+            sequence_id = sequence_id,
             mp = mp,
             maj_gap = gap,
             ipr = ipr,
             loc_len = loc_len,
+            spectral_function = spec_func, # NEW
             eigenvalues = eigenvalues_to_save,
             eigenvectors = eigenvectors_to_save
         ))
 
         # Save chunk if the DataFrame reaches the chunk size
         if nrow(results_df) >= chunk_size
-            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
             empty!(results_df)
-            thread_local_chunks[thread_id] += 1
+            thread_local_chunks[tid] = chunk_idx + 1
         end
     end
 
     # Save any remaining rows in each thread's DataFrame
-    for thread_id in keys(thread_local_results)
-        results_df = thread_local_results[thread_id]
+    for tid in 1:maxid
+        results_df = thread_local_results[tid]
         if nrow(results_df) > 0
-            chunk_idx = thread_local_chunks[thread_id]
-            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            chunk_idx = thread_local_chunks[tid]
+            file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
         end
     end
@@ -733,8 +859,9 @@ function np_generic_solver(
         maj_gap = Float64[],
         ipr = Float64[],
         loc_len = Float64[],
+        spectral_function = Union{Matrix{Float64}, Missing}[], # NEW
         eigenvalues = Union{Vector{Float64}, Missing}[],
-        eigenvectors = Union{Matrix{Float64}, Missing}[]
+        eigenvectors = Union{Matrix{ComplexF64}, Missing}[]
     ) for _ in 1:maxid]
     thread_local_chunks = ones(Int, maxid)
 
@@ -760,6 +887,7 @@ function np_generic_solver(
         gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
         ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
         loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+        spec_func = opts.calc_spec_func ? np_calc_spec_func(evals, evecs, opts.spec_eta, opts.spec_omega_range) : missing # NEW
 
         eigenvalues_to_save = begin
             if opts.save_evals == :all_np
@@ -793,12 +921,13 @@ function np_generic_solver(
             maj_gap = gap,
             ipr = ipr,
             loc_len = loc_len,
+            spectral_function = spec_func, # NEW
             eigenvalues = eigenvalues_to_save,
             eigenvectors = eigenvectors_to_save
         ))
 
         if nrow(results_df) >= chunk_size
-            file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
             empty!(results_df)
             thread_local_chunks[tid] = chunk_idx + 1
@@ -810,7 +939,7 @@ function np_generic_solver(
         results_df = thread_local_results[tid]
         if nrow(results_df) > 0
             chunk_idx = thread_local_chunks[tid]
-            file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
         end
     end
@@ -844,8 +973,9 @@ function np_seq_scaled_solver(
         maj_gap = Float64[],
         ipr = Float64[],
         loc_len = Float64[],
+        spectral_function = Union{Matrix{Float64}, Missing}[], # NEW
         eigenvalues = Union{Vector{Float64}, Missing}[],
-        eigenvectors = Union{Matrix{Float64}, Missing}[]
+        eigenvectors = Union{Matrix{ComplexF64}, Missing}[]
     ))
     thread_local_chunks = Dict(Threads.threadid() => 1)
 
@@ -863,8 +993,9 @@ function np_seq_scaled_solver(
                 maj_gap = Float64[],
                 ipr = Float64[],
                 loc_len = Float64[],
+                spectral_function = Union{Matrix{Float64}, Missing}[], # NEW
                 eigenvalues = Union{Vector{Float64}, Missing}[],
-                eigenvectors = Union{Matrix{Float64}, Missing}[]
+                eigenvectors = Union{Matrix{ComplexF64}, Missing}[]
             )
             thread_local_chunks[thread_id] = 1
         end
@@ -912,6 +1043,7 @@ function np_seq_scaled_solver(
         gap  = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
         ipr  = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
         llen = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+        spec_func = opts.calc_spec_func ? np_calc_spec_func(evals, evecs, opts.spec_eta, opts.spec_omega_range) : missing # NEW
 
         eigenvalues_to_save = begin
             if opts.save_evals == :all_np
@@ -945,6 +1077,7 @@ function np_seq_scaled_solver(
             maj_gap = gap,
             ipr = ipr,
             loc_len = llen,
+            spectral_function = spec_func, # NEW
             eigenvalues = eigenvalues_to_save,
             eigenvectors = eigenvectors_to_save
         ))
@@ -968,6 +1101,15 @@ function np_seq_scaled_solver(
     return nothing
 end
 
+"""
+    Notes:
+        - np_generic_solver iterates over all possible parameter ranges idnescriminately, hence 'generic'.
+        - The use of thread IDs to distribute tasks and data storage shoul donly be used on local machines where such ID-ing is known
+        - This can be used when the optimal loop method is not known or not needed.
+    CAUTION: 
+        - This ProgressMeter @showprogress may not give accurate representation of time remaining if disordered parameter looping results in variation in loop time over runtime.
+        - The chunk_size must be sufficiently small to not exceed the memory allocated to this task (again paying attention to idnescriminate loop orders).
+"""
 function np_mu_rho_restricted_solver(
     N_range::Vector{Int},
     t_n_range::Vector{Vector{Float64}},
@@ -981,16 +1123,6 @@ function np_mu_rho_restricted_solver(
     filepath::String,
     opts::UserOptions
 )
-    """
-        Notes:
-            - np_generic_solver iterates over all possible parameter ranges idnescriminately, hence 'generic'.
-            - The use of thread IDs to distribute tasks and data storage shoul donly be used on local machines where such ID-ing is known
-            - This can be used when the optimal loop method is not known or not needed.
-        CAUTION: 
-            - This ProgressMeter @showprogress may not give accurate representation of time remaining if disordered parameter looping results in variation in loop time over runtime.
-            - The chunk_size must be sufficiently small to not exceed the memory allocated to this task (again paying attention to idnescriminate loop orders).
-    """
-
     # Thread-local data store
     thread_local_results = Dict(Threads.threadid() => DataFrame(
         N = Int[],
@@ -1003,8 +1135,9 @@ function np_mu_rho_restricted_solver(
         maj_gap = Float64[],
         ipr = Float64[],
         loc_len = Float64[],
+        spectral_function = Union{Matrix{Float64}, Missing}[], # NEW
         eigenvalues = Union{Vector{Float64}, Missing}[],
-        eigenvectors = Union{Matrix{Float64}, Missing}[]
+        eigenvectors = Union{Matrix{ComplexF64}, Missing}[]
     ))
 
     # Thread-local chunk counters
@@ -1027,8 +1160,9 @@ function np_mu_rho_restricted_solver(
                 maj_gap = Float64[],
                 ipr = Float64[],
                 loc_len = Float64[],
+                spectral_function = Union{Matrix{Float64}, Missing}[], # NEW
                 eigenvalues = Union{Vector{Float64}, Missing}[],
-                eigenvectors = Union{Matrix{Float64}, Missing}[]
+                eigenvectors = Union{Matrix{ComplexF64}, Missing}[]
             )
             thread_local_chunks[thread_id] = 1
         end
@@ -1062,6 +1196,7 @@ function np_mu_rho_restricted_solver(
             gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
             ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
             loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+            spec_func = opts.calc_spec_func ? np_calc_spec_func(evals, evecs, opts.spec_eta, opts.spec_omega_range) : missing # NEW
 
 
             # Eigenvalue saving options (symbol-based)
@@ -1100,6 +1235,7 @@ function np_mu_rho_restricted_solver(
                 maj_gap = gap,
                 ipr = ipr,
                 loc_len = loc_len,
+                spectral_function = spec_func, # NEW
                 eigenvalues = eigenvalues_to_save,
                 eigenvectors = eigenvectors_to_save
             ))
@@ -1143,6 +1279,12 @@ function np_mu_rho_restricted_solver(
     return nothing
 end
 
+"""
+    Notes:
+        
+    CAUTION: 
+
+"""
 function hp_mu_rho_restricted_solver(
     N_range::Vector{Int},
     t_n_range::Vector{Vector{Float64}},
@@ -1156,13 +1298,6 @@ function hp_mu_rho_restricted_solver(
     filepath::String,
     opts::UserOptions
 )
-    """
-        Notes:
-            
-        CAUTION: 
-
-    """
-
     println("Starting hp_mu_rho_restricted_solver...")
 
     # Thread-local data store
@@ -1176,8 +1311,9 @@ function hp_mu_rho_restricted_solver(
         maj_gap = Float64[],
         ipr = Float64[],
         loc_len = Float64[],
+        spectral_function = Union{Matrix{Float64}, Missing}[], # NEW
         eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
-        eigenvectors = Union{Vector{Float64}, Vector{BigFloat}, Missing}[]
+        eigenvectors = Union{Matrix{Float64}, Matrix{BigFloat}, Missing}[]
     ))
 
     # Thread-local chunk counters
@@ -1199,8 +1335,9 @@ function hp_mu_rho_restricted_solver(
                 maj_gap = Float64[],
                 ipr = Float64[],
                 loc_len = Float64[],
+                spectral_function = Union{Matrix{Float64}, Missing}[], # NEW
                 eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
-                eigenvectors = Union{Vector{Float64}, Vector{BigFloat}, Missing}[]
+                eigenvectors = Union{Matrix{Float64}, Matrix{BigFloat}, Missing}[]
             )
             thread_local_chunks[thread_id] = 1
         end
@@ -1235,6 +1372,7 @@ function hp_mu_rho_restricted_solver(
             gap = opts.calc_mbs_energy_gap ? hp_mbs_gap_size(evals) : NaN
             ipr = opts.calc_ipr ? hp_calc_maj_ipr(evecs) : NaN
             loc_len = opts.calc_loc_len ? hp_calc_maj_loc_len(evecs) : NaN
+            spec_func = opts.calc_spec_func ? hp_calc_spec_func(evals, evecs, opts.spec_eta, opts.spec_omega_range) : missing # NEW
 
 
             # Eigenvalue saving options (symbol-based)
@@ -1282,6 +1420,7 @@ function hp_mu_rho_restricted_solver(
                 maj_gap = gap,
                 ipr = ipr,
                 loc_len = loc_len,
+                spectral_function = spec_func, # NEW
                 eigenvalues = eigenvalues_to_save,
                 eigenvectors = eigenvectors_to_save
             ))
@@ -1349,9 +1488,9 @@ function np_phason_loop_solver(
         maj_gap = Float64[],
         ipr = Float64[],
         loc_len = Float64[],
+        spectral_function = Union{Matrix{Float64}, Missing}[], # NEW
         eigenvalues = Union{Vector{Float64}, Missing}[],
-        eigenvectors = Union{Matrix{Float64}, Missing}[],
-        winding_phase = Union{Float64, Missing}[]
+        eigenvectors = Union{Matrix{ComplexF64}, Missing}[]
     ) for _ in 1:maxid]
     thread_local_chunks = ones(Int, maxid)
 
@@ -1385,6 +1524,7 @@ function np_phason_loop_solver(
             gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
             ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
             loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+            spec_func = opts.calc_spec_func ? np_calc_spec_func(evals, evecs, opts.spec_eta, opts.spec_omega_range) : missing # NEW
 
             current_winding = missing
             if opts.calc_proj_wind
@@ -1430,6 +1570,7 @@ function np_phason_loop_solver(
                 maj_gap = gap,
                 ipr = ipr,
                 loc_len = loc_len,
+                spectral_function = spec_func, # NEW
                 eigenvalues = eigenvalues_to_save,
                 eigenvectors = eigenvectors_to_save,
                 winding_phase = current_winding
@@ -1458,6 +1599,14 @@ function np_phason_loop_solver(
 end
 
 # not integrated
+"""
+    Notes:
+        - hp_mu_loop_solver is optimised for fixed N, t_n, Delta and sequence parameters, varying only a range of mu.
+        - Originaly written for serial HPC batch jobs where each job would then vary a secondary parameter.
+    
+    CAUTION:
+        - Must ensure parameters and density of mu_range are such that allocated memory is not exceeded before the end of single loop to allow data to be safely saved to .bson
+"""
 function hp_mu_loop_solver(
     N::Int,
     t_n::Vector{Float64},
@@ -1468,15 +1617,6 @@ function hp_mu_loop_solver(
     precision::Int,
     filepath::String
 )
-    """
-        Notes:
-            - hp_mu_loop_solver is optimised for fixed N, t_n, Delta and sequence parameters, varying only a range of mu.
-            - Originaly written for serial HPC batch jobs where each job would then vary a secondary parameter.
-        
-        CAUTION:
-            - Must ensure parameters and density of mu_range are such that allocated memory is not exceeded before the end of single loop to allow data to be safely saved to .bson
-    """
-
     # Initialize DataFrame for results
     results_df = DataFrame(
         N = Int[],
@@ -1661,6 +1801,130 @@ function hp_serial_solver_N_loop_threaded(
     full_filepath = "$(filepath)$(filename)"
 
     @save full_filepath results_df
+
+    return nothing
+end
+
+
+## user opts needs: kappas, x0s, gap_tol 
+function np_specloc_solver(
+    N_range::Vector{Int},
+    t_n_range::Vector{Vector{Float64}},
+    mu_range::Vector{Float64},
+    Delta_range::Vector{Float64},
+    sequences::Vector{Vector{Int}},
+    sequence_name::String,
+    sequence_ids::Vector{Tuple{Float64,Float64}},
+    chunk_size::Int,
+    filepath::String,
+    opts::UserOptions,
+    row_index::Union{Int,Nothing}
+)
+    # allocate by maxthreadid (not nthreads) to cover all possible thread ids
+    maxid = Threads.maxthreadid()
+    thread_local_results = [DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        sequence_id = Tuple{Float64,Float64}[],
+        # mp = Float64[],
+        # maj_gap = Float64[],
+        # ipr = Float64[],
+        # loc_len = Float64[],
+        # eigenvalues = Union{Vector{Float64}, Missing}[],
+        # eigenvectors = Union{Matrix{Float64}, Missing}[]
+        specloc_winding = Float64[],
+        specloc_gap = Float64[],
+        specloc_spectrum = Union{Vector{Float64}, Missing}[]
+    ) for _ in 1:maxid]
+    thread_local_chunks = ones(Int, maxid)
+
+    x0s = opts.x0s
+    kappas = opts.kappas
+
+    Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)), length(x0s), length(kappas))
+        tid = Threads.threadid()
+        results_df = thread_local_results[tid]
+        chunk_idx = thread_local_chunks[tid]
+
+        # Extract parameters
+        N = N_range[idx[1]]
+        t_n = t_n_range[idx[2]]
+        mu = mu_range[idx[3]]
+        Delta = Delta_range[idx[4]]
+        sequence = sequences[idx[5]]
+        sequence_id = sequence_ids[idx[5]]
+        x0 = x0s[idx[6]]
+        kappa = kappas[idx[7]]
+
+        # Solve
+        truncated_sequence = Vector(sequence[1:N])
+        H_BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
+        
+        X, Gamma = build_operators_block_basis(N)
+
+        # for x0 in opts.xs, kappa in opts.kappas
+                    
+        # X - x0 is diagonal, allowing fast vectorized math
+        X_diff = sparse(Diagonal(X.diag .- x0))
+        
+        # Assemble the 1D Spectral localiser
+        L = kappa .* (Gamma * X_diff) + H_BdG
+
+        winding_val, gap, spectrum = np_calc_specloc_full(L)
+
+        # # If the localiser gap closes, treat invariant as ill-defined (missing)
+        # winding_number = if gap <= opts.spec_loc_gap_tol
+        #     missing
+        # else
+        #     winding_val
+        # end
+        # end
+
+        # evals, evecs = LinearAlgebra.eigen(Hermitian(BdG))
+
+        # mp = opts.calc_mp ? np_calc_maj_mp(evecs) : NaN
+        # gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
+        # ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
+        # loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+
+        push!(results_df, (
+            N = N,
+            t_n = t_n,
+            mu = mu,
+            Delta = Delta,
+            sequence_name = sequence_name,
+            sequence_id = sequence_id,
+            # mp = mp,
+            # maj_gap = gap,
+            # ipr = ipr,
+            # loc_len = loc_len,
+            # eigenvalues = eigenvalues_to_save,
+            # eigenvectors = eigenvectors_to_save
+            specloc_winding = winding_val,
+            specloc_gap = gap,
+            specloc_spectrum = spectrum
+        ))
+
+        if nrow(results_df) >= chunk_size
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            @save file_name results_df
+            empty!(results_df)
+            thread_local_chunks[tid] = chunk_idx + 1
+        end
+    end
+
+    # Flush remaining per-thread results
+    for tid in 1:maxid
+        results_df = thread_local_results[tid]
+        if nrow(results_df) > 0
+            chunk_idx = thread_local_chunks[tid]
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            @save file_name results_df
+        end
+    end
 
     return nothing
 end
