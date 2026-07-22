@@ -1,14 +1,16 @@
 #!/bin/bash
 
-#SBATCH --job-name=Ph
+#SBATCH --job-name=LMP-HP-610
 #SBATCH --nodes=1
 #SBATCH --partition=compute
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --account=phys030424
-#SBATCH --array=1-10
-#SBATCH --time=01:00:00
-#SBATCH --mem=2G
+#SBATCH --array=1-101
+#SBATCH --time=20:00:00
+#SBATCH --mem=10G
+#SBATCH --output=/dev/null
 
 module add languages/julia
-JULIA_NUM_THREADS=1 julia /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/serial_batch/main_phason.jl $SLURM_ARRAY_TASK_ID
+export JULIA_DEPOT_PATH="/user/work/hb21877/.julia"
+JULIA_NUM_THREADS=1 julia /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/serial_batch/main.jl $SLURM_ARRAY_TASK_ID

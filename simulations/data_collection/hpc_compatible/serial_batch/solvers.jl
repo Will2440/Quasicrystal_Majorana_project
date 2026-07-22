@@ -47,14 +47,19 @@ using GenericLinearAlgebra
 using LinearAlgebra
 using Base.Threads
 using DataFrames
-using BSON: @save, @load
+# using BSON: @save, @load
+using JLD2: @save, @load
 
 
 struct UserOptions
     calc_mp::Bool
+    calc_loc_mp_scales::Bool
     calc_ipr::Bool
     calc_mbs_energy_gap::Bool
     calc_loc_len::Bool
+    calc_spec_func::Bool
+    spec_func_eta::Float64
+    spec_func_omega::Vector{Float64}
     calc_precision::Symbol # :hp or :np
     save_evecs::Symbol # :all_np, :all_hp, :maj_np, :maj_hp or :none
     save_evals::Symbol # :all_np, :all_hp, :maj_np, :maj_hp or :none
@@ -147,16 +152,19 @@ function hp_calc_maj_mp(
     num_rows = size(eigenvectors, 1)
     N = num_rows ÷ 2
     middle_state_index = N
+    middle_plus_one_state_index = N + 1
 
-    u = eigenvectors[1:N, middle_state_index]
-    v = eigenvectors[(N+1):2N, middle_state_index]
+    u_mid = eigenvectors[1:N, middle_state_index]
+    v_mid = eigenvectors[(N+1):2N, middle_state_index]
+    u_mpo = eigenvectors[1:N, middle_plus_one_state_index]
+    v_mpo = eigenvectors[(N+1):2N, middle_plus_one_state_index]
 
-    numerator_L = BigFloat(sum(u[i] * conj(v[i]) + v[i] * conj(u[i]) for i in 1:(N÷2)))
-    denominator_L = BigFloat(sum(abs2(u[i]) + abs2(v[i]) for i in 1:(N÷2)))
+    numerator_L = BigFloat(sum(u_mid[i] * conj(v_mid[i]) + v_mid[i] * conj(u_mid[i]) for i in 1:(N÷2)))
+    denominator_L = BigFloat(sum(abs2(u_mid[i]) + abs2(v_mid[i]) for i in 1:(N÷2)))
     MP_L = numerator_L / denominator_L
 
-    numerator_R = BigFloat(sum(u[i] * conj(v[i]) + v[i] * conj(u[i]) for i in ((N÷2)+1):N))
-    denominator_R = BigFloat(sum(abs2(u[i]) + abs2(v[i]) for i in ((N÷2)+1):N))
+    numerator_R = BigFloat(sum(u_mpo[i] * conj(v_mpo[i]) + v_mpo[i] * conj(u_mpo[i]) for i in ((N÷2)+1):N))
+    denominator_R = BigFloat(sum(abs2(u_mpo[i]) + abs2(v_mpo[i]) for i in ((N÷2)+1):N))
     MP_R = numerator_R / denominator_R
 
     overall_MP = MP_L * MP_R
@@ -171,21 +179,198 @@ function np_calc_maj_mp(
     num_rows = size(eigenvectors, 1)
     N = num_rows ÷ 2
     middle_state_index = N
+    middle_plus_one_state_index = N + 1
+    u_mid = eigenvectors[1:N, middle_state_index]
+    v_mid = eigenvectors[(N+1):2N, middle_state_index]
+    u_mpo = eigenvectors[1:N, middle_plus_one_state_index]
+    v_mpo = eigenvectors[(N+1):2N, middle_plus_one_state_index]
 
-    u = eigenvectors[1:N, middle_state_index]
-    v = eigenvectors[(N+1):2N, middle_state_index]
-
-    numerator_L = Float64(sum(u[i] * conj(v[i]) + v[i] * conj(u[i]) for i in 1:(N÷2)))
-    denominator_L = Float64(sum(abs2(u[i]) + abs2(v[i]) for i in 1:(N÷2)))
+    numerator_L = Float64(sum(u_mid[i] * conj(v_mid[i]) + v_mid[i] * conj(u_mid[i]) for i in 1:(N÷2)))
+    denominator_L = Float64(sum(abs2(u_mid[i]) + abs2(v_mid[i]) for i in 1:(N÷2)))
     MP_L = numerator_L / denominator_L
 
-    numerator_R = Float64(sum(u[i] * conj(v[i]) + v[i] * conj(u[i]) for i in ((N÷2)+1):N))
-    denominator_R = Float64(sum(abs2(u[i]) + abs2(v[i]) for i in ((N÷2)+1):N))
+    numerator_R = Float64(sum(u_mpo[i] * conj(v_mpo[i]) + v_mpo[i] * conj(u_mpo[i]) for i in ((N÷2)+1):N))
+    denominator_R = Float64(sum(abs2(u_mpo[i]) + abs2(v_mpo[i]) for i in ((N÷2)+1):N))
     MP_R = numerator_R / denominator_R
 
     overall_MP = MP_L * MP_R
 
     return overall_MP::Float64
+end
+
+function hp_calc_local_scales_mp_allscales(
+    eigenvectors::Matrix{Complex{BigFloat}}
+)::Vector{NamedTuple}
+    num_rows = size(eigenvectors, 1)
+    N = num_rows ÷ 2
+    middle_state_index = N
+    middle_plus_one_state_index = N + 1
+    
+    u_mid = @view eigenvectors[1:N, middle_state_index]
+    v_mid = @view eigenvectors[N+1:end, middle_state_index]
+    u_mpo = @view eigenvectors[1:N, middle_plus_one_state_index]
+    v_mpo = @view eigenvectors[N+1:end, middle_plus_one_state_index]
+
+    num_mid = (u_mid .* conj.(v_mid) .+ v_mid .* conj.(u_mid))
+    den_mid = (abs2.(u_mid) .+ abs2.(v_mid))
+    
+    num_mpo = (u_mpo .* conj.(v_mpo) .+ v_mpo .* conj.(u_mpo))
+    den_mpo = (abs2.(u_mpo) .+ abs2.(v_mpo))
+
+    C_num_mid = zeros(BigFloat, N + 1)
+    C_den_mid = zeros(BigFloat, N + 1)
+    C_num_mpo = zeros(BigFloat, N + 1)
+    C_den_mpo = zeros(BigFloat, N + 1)
+    
+    for i in 1:N
+        C_num_mid[i+1] = C_num_mid[i] + num_mid[i]
+        C_den_mid[i+1] = C_den_mid[i] + den_mid[i]
+        C_num_mpo[i+1] = C_num_mpo[i] + num_mpo[i]
+        C_den_mpo[i+1] = C_den_mpo[i] + den_mpo[i]
+    end
+
+    n_tasks = (N * (N + 1)) ÷ 2
+    TupleType = NamedTuple{(:scale, :start_site, :end_site, :numerator_L, :denominator_L, :MP_L, :numerator_R, :denominator_R, :MP_R, :overall_MP), Tuple{Int, Int, Int, Float64, Float64, Float64, Float64, Float64, Float64, Float64}}
+    results = Vector{TupleType}(undef, n_tasks)
+
+    idx = 1
+    for scale in 1:N
+        for start_site in 1:(N - scale + 1)
+            end_site = start_site + scale - 1
+            
+            if isodd(scale)
+                mid_site = start_site + (scale - 1) ÷ 2
+                L_end = mid_site
+                R_start = mid_site
+            else
+                L_end = start_site + scale ÷ 2 - 1
+                R_start = start_site + scale ÷ 2
+            end
+            
+            num_L = C_num_mid[L_end+1] - C_num_mid[start_site]
+            den_L = C_den_mid[L_end+1] - C_den_mid[start_site]
+            
+            num_R = C_num_mpo[end_site+1] - C_num_mpo[R_start]
+            den_R = C_den_mpo[end_site+1] - C_den_mpo[R_start]
+            
+            MP_L = den_L == 0.0 ? BigFloat(0.0) : num_L / den_L
+            MP_R = den_R == 0.0 ? BigFloat(0.0) : num_R / den_R
+
+            overall_MP = conj(MP_L) * MP_R
+            try
+                overall_MP = Float64(overall_MP)
+            catch err
+                @warn "overall_MP is complex, taking real part. Details:" value=overall_MP error=err
+                overall_MP = Float64(real(overall_MP))
+            end
+
+            results[idx] = (
+                scale=scale,
+                start_site=start_site,
+                end_site=end_site,
+                numerator_L=Float64(num_L),
+                denominator_L=Float64(den_L),
+                MP_L=Float64(MP_L),
+                numerator_R=Float64(num_R),
+                denominator_R=Float64(den_R),
+                MP_R=Float64(MP_R),
+                overall_MP=Float64(overall_MP)
+            )
+            idx += 1
+        end
+    end
+
+    return results
+end
+
+function np_calc_local_scales_mp_allscales(
+    eigenvectors::Matrix{ComplexF64}
+)::Vector{NamedTuple}
+    num_rows = size(eigenvectors, 1)
+    N = num_rows ÷ 2
+    middle_state_index = N
+    middle_plus_one_state_index = N + 1
+    
+    u_mid = @view eigenvectors[1:N, middle_state_index]
+    v_mid = @view eigenvectors[N+1:end, middle_state_index]
+    u_mpo = @view eigenvectors[1:N, middle_plus_one_state_index]
+    v_mpo = @view eigenvectors[N+1:end, middle_plus_one_state_index]
+
+    # Pre-calculate site-wise real values
+    num_mid = (u_mid .* conj.(v_mid) .+ v_mid .* conj.(u_mid))
+    den_mid = (abs2.(u_mid) .+ abs2.(v_mid))
+    
+    num_mpo = (u_mpo .* conj.(v_mpo) .+ v_mpo .* conj.(u_mpo))
+    den_mpo = (abs2.(u_mpo) .+ abs2.(v_mpo))
+
+    # Build Cumulative Sum (Prefix Sum) arrays for O(1) interval queries
+    # Padded with a leading 0 so sum(start:end) = C[end+1] - C[start]
+    C_num_mid = zeros(Float64, N + 1)
+    C_den_mid = zeros(Float64, N + 1)
+    C_num_mpo = zeros(Float64, N + 1)
+    C_den_mpo = zeros(Float64, N + 1)
+    
+    for i in 1:N
+        C_num_mid[i+1] = C_num_mid[i] + num_mid[i]
+        C_den_mid[i+1] = C_den_mid[i] + den_mid[i]
+        C_num_mpo[i+1] = C_num_mpo[i] + num_mpo[i]
+        C_den_mpo[i+1] = C_den_mpo[i] + den_mpo[i]
+    end
+
+    # Pre-allocate exact size for resulting NamedTuples
+    n_tasks = (N * (N + 1)) ÷ 2
+    TupleType = NamedTuple{(:scale, :start_site, :end_site, :numerator_L, :denominator_L, :MP_L, :numerator_R, :denominator_R, :MP_R, :overall_MP), Tuple{Int, Int, Int, Float64, Float64, Float64, Float64, Float64, Float64, Float64}}
+    results = Vector{TupleType}(undef, n_tasks)
+
+    idx = 1
+    for scale in 1:N
+        for start_site in 1:(N - scale + 1)
+            end_site = start_site + scale - 1
+            
+            if isodd(scale)
+                mid_site = start_site + (scale - 1) ÷ 2
+                L_end = mid_site
+                R_start = mid_site
+            else
+                L_end = start_site + scale ÷ 2 - 1
+                R_start = start_site + scale ÷ 2
+            end
+            
+            # Use prefix arrays for instant O(1) sum inside specific slice
+            num_L = C_num_mid[L_end+1] - C_num_mid[start_site]
+            den_L = C_den_mid[L_end+1] - C_den_mid[start_site]
+            
+            num_R = C_num_mpo[end_site+1] - C_num_mpo[R_start]
+            den_R = C_den_mpo[end_site+1] - C_den_mpo[R_start]
+            
+            MP_L = den_L == 0.0 ? 0.0 : num_L / den_L
+            MP_R = den_R == 0.0 ? 0.0 : num_R / den_R
+            
+            overall_MP = conj(MP_L) * MP_R
+            try
+                overall_MP = Float64(overall_MP)
+            catch err
+                @warn "overall_MP is complex, taking real part. Details:" value=overall_MP error=err
+                overall_MP = Float64(real(overall_MP))
+            end
+
+            results[idx] = (
+                scale=scale,
+                start_site=start_site,
+                end_site=end_site,
+                numerator_L=num_L,
+                denominator_L=den_L,
+                MP_L=MP_L,
+                numerator_R=num_R,
+                denominator_R=den_R,
+                MP_R=MP_R,
+                overall_MP=overall_MP
+            )
+            idx += 1
+        end
+    end
+
+    return results
 end
 
 function hp_calc_maj_ipr(
@@ -276,6 +461,128 @@ function np_mbs_gap_size(
     return gap_size::Float64
 end
 
+# function hp_calc_spec_func(
+#     eigenvalues::Vector{BigFloat},
+#     eigenvectors::Matrix{Complex{BigFloat}},
+#     eta::Float64,
+#     omega_range::Vector{Float64}
+# )
+#     N_sites = size(eigenvectors, 1) ÷ 2
+#     N_states = N_sites
+#     num_omegas = length(omega_range)
+    
+#     spectral_values = zeros(Float64, N_sites, num_omegas)
+#     vecs_sq = abs2.(eigenvectors)
+#     big_eta = BigFloat(eta)
+    
+#     for j in 1:num_omegas
+#         z = BigFloat(omega_range[j]) + im * big_eta
+#         for site_idx in 1:N_sites
+#             G_ii_particle = zero(Complex{BigFloat})
+#             G_ii_hole = zero(Complex{BigFloat})
+#             for k in 1:N_states
+#                 val = 1.0 / (z - eigenvalues[k])
+#                 G_ii_particle += vecs_sq[site_idx, k] * val
+#                 G_ii_hole     += vecs_sq[N_sites + site_idx, k] * val
+#             end
+#             spectral_values[site_idx, j] = Float64(-imag(G_ii_particle + G_ii_hole) / (2 * π))
+#         end
+#     end
+    
+#     return spectral_values
+# end
+
+# function np_calc_spec_func(
+#     eigenvalues::Vector{Float64},
+#     eigenvectors::Matrix{ComplexF64},
+#     eta::Float64,
+#     omega_range::Vector{Float64}
+# )
+#     N_sites = size(eigenvectors, 1) ÷ 2
+#     N_states = N_sites
+#     num_omegas = length(omega_range)
+    
+#     spectral_values = zeros(Float64, N_sites, num_omegas)
+#     vecs_sq = abs2.(eigenvectors)
+    
+#     for j in 1:num_omegas
+#         z = omega_range[j] + im * eta
+#         for site_idx in 1:N_sites
+#             G_ii_particle = zero(ComplexF64)
+#             G_ii_hole = zero(ComplexF64)
+#             for k in 1:N_states
+#                 val = 1.0 / (z - eigenvalues[k])
+#                 G_ii_particle += vecs_sq[site_idx, k] * val
+#                 G_ii_hole     += vecs_sq[N_sites + site_idx, k] * val
+#             end
+#             spectral_values[site_idx, j] = -imag(G_ii_particle + G_ii_hole) / (2π)
+#         end
+#     end
+    
+#     return spectral_values
+# end
+
+function hp_calc_spec_func(
+    eigenvalues::Vector{BigFloat},
+    eigenvectors::Matrix{Complex{BigFloat}},
+    eta::Float64,
+    omega_range::Vector{Float64}
+)
+    N_sites = size(eigenvectors, 1) ÷ 2
+    N_states = 2 * N_sites
+    num_omegas = length(omega_range)
+    
+    spectral_values = zeros(Float64, N_sites, num_omegas)
+    vecs_sq = abs2.(eigenvectors)
+    big_eta = BigFloat(eta)
+    
+    for j in 1:num_omegas
+        z = BigFloat(omega_range[j]) + im * big_eta
+        for site_idx in 1:N_sites
+            G_ii_particle = zero(Complex{BigFloat})
+            G_ii_hole = zero(Complex{BigFloat})
+            for k in 1:N_states
+                val = 1.0 / (z - eigenvalues[k])
+                G_ii_particle += vecs_sq[site_idx, k] * val
+                G_ii_hole     += vecs_sq[N_sites + site_idx, k] * val
+            end
+            spectral_values[site_idx, j] = Float64(-imag(G_ii_particle + G_ii_hole) / (2 * π))
+        end
+    end
+    
+    return spectral_values
+end
+
+function np_calc_spec_func(
+    eigenvalues::Vector{Float64},
+    eigenvectors::Matrix{ComplexF64},
+    eta::Float64,
+    omega_range::Vector{Float64}
+)
+    N_sites = size(eigenvectors, 1) ÷ 2
+    N_states = 2 * N_sites
+    num_omegas = length(omega_range)
+    
+    spectral_values = zeros(Float64, N_sites, num_omegas)
+    vecs_sq = abs2.(eigenvectors)
+    
+    for j in 1:num_omegas
+        z = omega_range[j] + im * eta
+        for site_idx in 1:N_sites
+            G_ii_particle = zero(ComplexF64)
+            G_ii_hole = zero(ComplexF64)
+            for k in 1:N_states
+                val = 1.0 / (z - eigenvalues[k])
+                G_ii_particle += vecs_sq[site_idx, k] * val
+                G_ii_hole     += vecs_sq[N_sites + site_idx, k] * val
+            end
+            spectral_values[site_idx, j] = -imag(G_ii_particle + G_ii_hole) / (2π)
+        end
+    end
+    
+    return spectral_values
+end
+
 function np_flattened_Q(
     evals::Vector{Float64}, 
     evecs::Matrix{Float64};
@@ -333,7 +640,6 @@ end
 ################ Sec 3: Solving Functions #################
 ###########################################################
 
-
 function hp_generic_solver(
     N_range::Vector{Int},
     t_n_range::Vector{Vector{Float64}},
@@ -341,64 +647,37 @@ function hp_generic_solver(
     Delta_range::Vector{Float64},
     sequences::Vector{Vector{Int}},
     sequence_name::String,
+    sequence_ids::Vector{Tuple{Float64,Float64}},
     precision::Int,
     chunk_size::Int,
     filepath::String,
     opts::UserOptions,
     row_index::Union{Int,Nothing}
 )
-    """
-    Notes:
-        - hp_generic_solver iterates over all possible parameter ranges indiscriminately, hence 'generic'.
-        - The use of thread IDs to distribute tasks and data storage should only be used on local machines where such ID-ing is known
-        - This can be used when the optimal loop method is not known or not needed.
-    CAUTION: 
-        - This ProgressMeter @showprogress may not give accurate representation of time remaining if disordered parameter looping results in variation in loop time over runtime.
-        - The chunk_size must be sufficiently small to not exceed the memory allocated to this task (again paying attention to indiscriminate loop orders).
-    """
-
-    # Thread-local data store
-    thread_local_results = Dict(Threads.threadid() => DataFrame(
+    # Allocate by maxthreadid (not nthreads) to cover all possible thread ids
+    maxid = Threads.maxthreadid()
+    thread_local_results = [DataFrame(
         N = Int[],
         t_n = Vector{Float64}[],
         mu = Float64[],
         Delta = Float64[],
         sequence_name = String[],
+        sequence_id = Tuple{Float64,Float64}[],
         mp = Float64[],
         maj_gap = Float64[],
         ipr = Float64[],
         loc_len = Float64[],
+        spectral_function = Union{Matrix{Float64}, Missing}[],
+        mp_local_scales = Union{Vector{NamedTuple}, Missing}[],
         eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
-        eigenvectors = Union{Matrix{Float64}, Matrix{BigFloat}, Missing}[]
-    ))
+        eigenvectors = Union{Matrix{Complex{Float64}}, Matrix{Complex{BigFloat}}, Missing}[]
+    ) for _ in 1:maxid]
+    thread_local_chunks = ones(Int, maxid)
 
-    # Thread-local chunk counters
-    thread_local_chunks = Dict(Threads.threadid() => 1)
-
-    # Iterate over parameter combinations in parallel
-    Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
-        thread_id = Threads.threadid()
-
-        # Initialize thread-local storage for this thread (if not already initialized)
-        if !haskey(thread_local_results, thread_id)
-            thread_local_results[thread_id] = DataFrame(
-                N = Int[],
-                t_n = Vector{Float64}[],
-                mu = Float64[],
-                Delta = Float64[],
-                sequence_name = String[],
-                mp = Float64[],
-                maj_gap = Float64[],
-                ipr = Float64[],
-                loc_len = Float64[],
-                eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
-                eigenvectors = Union{Vector{Float64}, Vector{BigFloat}, Missing}[]
-            )
-            thread_local_chunks[thread_id] = 1
-        end
-
-        results_df = thread_local_results[thread_id]
-        chunk_idx = thread_local_chunks[thread_id]
+    Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
+        tid = Threads.threadid()
+        results_df = thread_local_results[tid]
+        chunk_idx = thread_local_chunks[tid]
 
         # Extract parameters
         N = N_range[idx[1]]
@@ -406,6 +685,7 @@ function hp_generic_solver(
         mu = mu_range[idx[3]]
         Delta = Delta_range[idx[4]]
         sequence = sequences[idx[5]]
+        sequence_id = sequence_ids[idx[5]]
 
         # Perform computations
         truncated_sequence = Vector(sequence[1:N])
@@ -417,6 +697,8 @@ function hp_generic_solver(
         gap = opts.calc_mbs_energy_gap ? hp_mbs_gap_size(evals) : NaN
         ipr = opts.calc_ipr ? hp_calc_maj_ipr(evecs) : NaN
         loc_len = opts.calc_loc_len ? hp_calc_maj_loc_len(evecs) : NaN
+        spectral_function = opts.calc_spec_func ? hp_calc_spec_func(evals, evecs, opts.spec_func_eta, opts.spec_func_omega) : missing
+        mp_local_scales = opts.calc_loc_mp_scales ? hp_calc_local_scales_mp_allscales(evecs) : missing
 
         # Eigenvalue saving options (symbol-based)
         eigenvalues_to_save = begin
@@ -430,12 +712,6 @@ function hp_generic_solver(
             elseif opts.save_evals == :maj_np
                 mid = length(evals) ÷ 2
                 (Float64.(evals))[mid:mid+1]
-            elseif opts.save_evals == :half_hp
-                mid = length(evals) ÷ 2
-                evals[1:mid]
-            elseif opts.save_evals == :half_np
-                mid = length(evals) ÷ 2
-                Float64.(evals[1:mid])
             else
                 missing
             end
@@ -465,29 +741,32 @@ function hp_generic_solver(
             mu = mu,
             Delta = Delta,
             sequence_name = sequence_name,
+            sequence_id = sequence_id,
             mp = mp,
             maj_gap = gap,
             ipr = ipr,
             loc_len = loc_len,
+            spectral_function = spectral_function,
+            mp_local_scales = mp_local_scales,
             eigenvalues = eigenvalues_to_save,
             eigenvectors = eigenvectors_to_save
         ))
 
         # Save chunk if the DataFrame reaches the chunk size
         if nrow(results_df) >= chunk_size
-            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
             empty!(results_df)
-            thread_local_chunks[thread_id] += 1
+            thread_local_chunks[tid] = chunk_idx + 1
         end
     end
 
     # Save any remaining rows in each thread's DataFrame
-    for thread_id in keys(thread_local_results)
-        results_df = thread_local_results[thread_id]
+    for tid in 1:maxid
+        results_df = thread_local_results[tid]
         if nrow(results_df) > 0
-            chunk_idx = thread_local_chunks[thread_id]
-            file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+            chunk_idx = thread_local_chunks[tid]
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
         end
     end
@@ -521,6 +800,8 @@ function np_generic_solver(
         maj_gap = Float64[],
         ipr = Float64[],
         loc_len = Float64[],
+        spectral_function = Union{Matrix{Float64}, Missing}[],
+        mp_local_scales = Union{Vector{NamedTuple}, Missing}[],
         eigenvalues = Union{Vector{Float64}, Missing}[],
         eigenvectors = Union{Matrix{Float64}, Missing}[]
     ) for _ in 1:maxid]
@@ -548,6 +829,8 @@ function np_generic_solver(
         gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
         ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
         loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+        spectral_function = opts.calc_spec_func ? np_calc_spec_func(evals, evecs, opts.spec_func_eta, opts.spec_func_omega) : missing
+        mp_local_scales = opts.calc_loc_mp_scales ? np_calc_local_scales_mp_allscales(evecs) : missing
 
         eigenvalues_to_save = begin
             if opts.save_evals == :all_np
@@ -555,9 +838,6 @@ function np_generic_solver(
             elseif opts.save_evals == :maj_np
                 mid = length(evals) ÷ 2
                 evals[mid:mid+1]
-            elseif opts.save_evals == :half_np
-                mid = length(evals) ÷ 2
-                evals[1:mid]
             else
                 missing
             end
@@ -584,12 +864,14 @@ function np_generic_solver(
             maj_gap = gap,
             ipr = ipr,
             loc_len = loc_len,
+            spectral_function = spectral_function,
+            mp_local_scales = mp_local_scales,
             eigenvalues = eigenvalues_to_save,
             eigenvectors = eigenvectors_to_save
         ))
 
         if nrow(results_df) >= chunk_size
-            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
             empty!(results_df)
             thread_local_chunks[tid] = chunk_idx + 1
@@ -601,13 +883,288 @@ function np_generic_solver(
         results_df = thread_local_results[tid]
         if nrow(results_df) > 0
             chunk_idx = thread_local_chunks[tid]
-            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
         end
     end
 
     return nothing
 end
+
+# function hp_generic_solver(
+#     N_range::Vector{Int},
+#     t_n_range::Vector{Vector{Float64}},
+#     mu_range::Vector{Float64},
+#     Delta_range::Vector{Float64},
+#     sequences::Vector{Vector{Int}},
+#     sequence_name::String,
+#     precision::Int,
+#     chunk_size::Int,
+#     filepath::String,
+#     opts::UserOptions,
+#     row_index::Union{Int,Nothing}
+# )
+#     """
+#     Notes:
+#         - hp_generic_solver iterates over all possible parameter ranges indiscriminately, hence 'generic'.
+#         - The use of thread IDs to distribute tasks and data storage should only be used on local machines where such ID-ing is known
+#         - This can be used when the optimal loop method is not known or not needed.
+#     CAUTION: 
+#         - This ProgressMeter @showprogress may not give accurate representation of time remaining if disordered parameter looping results in variation in loop time over runtime.
+#         - The chunk_size must be sufficiently small to not exceed the memory allocated to this task (again paying attention to indiscriminate loop orders).
+#     """
+
+#     # Thread-local data store
+#     thread_local_results = Dict(Threads.threadid() => DataFrame(
+#         N = Int[],
+#         t_n = Vector{Float64}[],
+#         mu = Float64[],
+#         Delta = Float64[],
+#         sequence_name = String[],
+#         mp = Float64[],
+#         maj_gap = Float64[],
+#         ipr = Float64[],
+#         loc_len = Float64[],
+#         eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
+#         eigenvectors = Union{Matrix{Float64}, Matrix{BigFloat}, Missing}[]
+#     ))
+
+#     # Thread-local chunk counters
+#     thread_local_chunks = Dict(Threads.threadid() => 1)
+
+#     # Iterate over parameter combinations in parallel
+#     Threads.@threads for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
+#         thread_id = Threads.threadid()
+
+#         # Initialize thread-local storage for this thread (if not already initialized)
+#         if !haskey(thread_local_results, thread_id)
+#             thread_local_results[thread_id] = DataFrame(
+#                 N = Int[],
+#                 t_n = Vector{Float64}[],
+#                 mu = Float64[],
+#                 Delta = Float64[],
+#                 sequence_name = String[],
+#                 mp = Float64[],
+#                 maj_gap = Float64[],
+#                 ipr = Float64[],
+#                 loc_len = Float64[],
+#                 eigenvalues = Union{Vector{Float64}, Vector{BigFloat}, Missing}[],
+#                 eigenvectors = Union{Vector{Float64}, Vector{BigFloat}, Missing}[]
+#             )
+#             thread_local_chunks[thread_id] = 1
+#         end
+
+#         results_df = thread_local_results[thread_id]
+#         chunk_idx = thread_local_chunks[thread_id]
+
+#         # Extract parameters
+#         N = N_range[idx[1]]
+#         t_n = t_n_range[idx[2]]
+#         mu = mu_range[idx[3]]
+#         Delta = Delta_range[idx[4]]
+#         sequence = sequences[idx[5]]
+
+#         # Perform computations
+#         truncated_sequence = Vector(sequence[1:N])
+#         BdG = hp_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence, precision)
+#         evals, evecs = GenericLinearAlgebra.eigen(Hermitian(BdG))
+
+#         # Calculation options (use opts)
+#         mp = opts.calc_mp ? hp_calc_maj_mp(evecs) : NaN
+#         gap = opts.calc_mbs_energy_gap ? hp_mbs_gap_size(evals) : NaN
+#         ipr = opts.calc_ipr ? hp_calc_maj_ipr(evecs) : NaN
+#         loc_len = opts.calc_loc_len ? hp_calc_maj_loc_len(evecs) : NaN
+
+#         # Eigenvalue saving options (symbol-based)
+#         eigenvalues_to_save = begin
+#             if opts.save_evals == :all_hp
+#                 evals
+#             elseif opts.save_evals == :all_np
+#                 Float64.(evals)
+#             elseif opts.save_evals == :maj_hp
+#                 mid = length(evals) ÷ 2
+#                 evals[mid:mid+1]
+#             elseif opts.save_evals == :maj_np
+#                 mid = length(evals) ÷ 2
+#                 (Float64.(evals))[mid:mid+1]
+#             elseif opts.save_evals == :half_hp
+#                 mid = length(evals) ÷ 2
+#                 evals[1:mid]
+#             elseif opts.save_evals == :half_np
+#                 mid = length(evals) ÷ 2
+#                 Float64.(evals[1:mid])
+#             else
+#                 missing
+#             end
+#         end
+
+#         # Eigenvector saving options (symbol-based)
+#         eigenvectors_to_save = begin
+#             if opts.save_evecs == :all_hp
+#                 evecs
+#             elseif opts.save_evecs == :all_np
+#                 Float64.(evecs)
+#             elseif opts.save_evecs == :maj_hp
+#                 mid = size(evecs, 2) ÷ 2
+#                 evecs[:, mid:mid+1]
+#             elseif opts.save_evecs == :maj_np
+#                 mid = size(evecs, 2) ÷ 2
+#                 (Float64.(evecs))[:, mid:mid+1]
+#             else
+#                 missing
+#             end
+#         end
+
+#         # Append results to the thread's local DataFrame
+#         push!(results_df, (
+#             N = N,
+#             t_n = t_n,
+#             mu = mu,
+#             Delta = Delta,
+#             sequence_name = sequence_name,
+#             mp = mp,
+#             maj_gap = gap,
+#             ipr = ipr,
+#             loc_len = loc_len,
+#             eigenvalues = eigenvalues_to_save,
+#             eigenvectors = eigenvectors_to_save
+#         ))
+
+#         # Save chunk if the DataFrame reaches the chunk size
+#         if nrow(results_df) >= chunk_size
+#             file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+#             @save file_name results_df
+#             empty!(results_df)
+#             thread_local_chunks[thread_id] += 1
+#         end
+#     end
+
+#     # Save any remaining rows in each thread's DataFrame
+#     for thread_id in keys(thread_local_results)
+#         results_df = thread_local_results[thread_id]
+#         if nrow(results_df) > 0
+#             chunk_idx = thread_local_chunks[thread_id]
+#             file_name = "$(filepath)_thread_$(thread_id)_chunk_$(chunk_idx).bson"
+#             @save file_name results_df
+#         end
+#     end
+
+#     return nothing
+# end
+
+# function np_generic_solver(
+#     N_range::Vector{Int},
+#     t_n_range::Vector{Vector{Float64}},
+#     mu_range::Vector{Float64},
+#     Delta_range::Vector{Float64},
+#     sequences::Vector{Vector{Int}},
+#     sequence_name::String,
+#     sequence_ids::Vector{Tuple{Float64,Float64}},
+#     chunk_size::Int,
+#     filepath::String,
+#     opts::UserOptions,
+#     row_index::Union{Int,Nothing}
+# )
+#     # allocate by maxthreadid (not nthreads) to cover all possible thread ids
+#     maxid = Threads.maxthreadid()
+#     thread_local_results = [DataFrame(
+#         N = Int[],
+#         t_n = Vector{Float64}[],
+#         mu = Float64[],
+#         Delta = Float64[],
+#         sequence_name = String[],
+#         sequence_id = Tuple{Float64,Float64}[],
+#         mp = Float64[],
+#         maj_gap = Float64[],
+#         ipr = Float64[],
+#         loc_len = Float64[],
+#         eigenvalues = Union{Vector{Float64}, Missing}[],
+#         eigenvectors = Union{Matrix{Float64}, Missing}[]
+#     ) for _ in 1:maxid]
+#     thread_local_chunks = ones(Int, maxid)
+
+#     Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)))
+#         tid = Threads.threadid()
+#         results_df = thread_local_results[tid]
+#         chunk_idx = thread_local_chunks[tid]
+
+#         # Extract parameters
+#         N = N_range[idx[1]]
+#         t_n = t_n_range[idx[2]]
+#         mu = mu_range[idx[3]]
+#         Delta = Delta_range[idx[4]]
+#         sequence = sequences[idx[5]]
+#         sequence_id = sequence_ids[idx[5]]
+
+#         # Solve
+#         truncated_sequence = Vector(sequence[1:N])
+#         BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
+#         evals, evecs = LinearAlgebra.eigen(Hermitian(BdG))
+
+#         mp = opts.calc_mp ? np_calc_maj_mp(evecs) : NaN
+#         gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
+#         ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
+#         loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
+
+#         eigenvalues_to_save = begin
+#             if opts.save_evals == :all_np
+#                 evals
+#             elseif opts.save_evals == :maj_np
+#                 mid = length(evals) ÷ 2
+#                 evals[mid:mid+1]
+#             elseif opts.save_evals == :half_np
+#                 mid = length(evals) ÷ 2
+#                 evals[1:mid]
+#             else
+#                 missing
+#             end
+#         end
+#         eigenvectors_to_save = begin
+#             if opts.save_evecs == :all_np
+#                 evecs
+#             elseif opts.save_evecs == :maj_np
+#                 mid = size(evecs, 2) ÷ 2
+#                 evecs[:, mid:mid+1]
+#             else
+#                 missing
+#             end
+#         end
+
+#         push!(results_df, (
+#             N = N,
+#             t_n = t_n,
+#             mu = mu,
+#             Delta = Delta,
+#             sequence_name = sequence_name,
+#             sequence_id = sequence_id,
+#             mp = mp,
+#             maj_gap = gap,
+#             ipr = ipr,
+#             loc_len = loc_len,
+#             eigenvalues = eigenvalues_to_save,
+#             eigenvectors = eigenvectors_to_save
+#         ))
+
+#         if nrow(results_df) >= chunk_size
+#             file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+#             @save file_name results_df
+#             empty!(results_df)
+#             thread_local_chunks[tid] = chunk_idx + 1
+#         end
+#     end
+
+#     # Flush remaining per-thread results
+#     for tid in 1:maxid
+#         results_df = thread_local_results[tid]
+#         if nrow(results_df) > 0
+#             chunk_idx = thread_local_chunks[tid]
+#             file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+#             @save file_name results_df
+#         end
+#     end
+
+#     return nothing
+# end
 
 function np_seq_scaled_solver(
     N_range::Vector{Int},

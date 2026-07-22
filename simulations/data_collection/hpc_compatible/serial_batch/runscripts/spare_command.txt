@@ -58,3 +58,17 @@ array_runtime_stats() {
           printf "Avg runtime: %s\n", fmt(int(sum / count))
         }'
 }
+
+
+## Command to watch all my running jobs
+watch -n 1 "squeue -u hb21877 -o '%.25i %.25j %.5t %.10M'"
+
+## ## Scrollable of above
+while true; do 
+    echo "--- Update: $(date +%H:%M:%S) ---"; 
+    squeue -u hb21877 -o '%.25i %.25j %.5t %.10M'; 
+    sleep 1; 
+done
+
+## Command to watch all array tasks of a specific master job ID 123456
+watch -n 2 "squeue -j 123456 -o '%.10A %.5a %.20j %.10t %.10M'"
