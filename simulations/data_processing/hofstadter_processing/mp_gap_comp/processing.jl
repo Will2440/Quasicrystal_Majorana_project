@@ -413,10 +413,10 @@ function compute_bulk_gaps_robust(
         bulk_gaps[i] = bulk_gap
     end
 
-    writedlm("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/access_results/bulk_gaps.txt", bulk_gaps)
-    writedlm("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/access_results/mid_gaps.txt", mid_gaps)
-    writedlm("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/access_results/outer_gaps.txt", outer_gaps)
-    writedlm("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/access_results/mu_vals.txt", df[!, mu_col])
+    # writedlm("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/access_results/bulk_gaps.txt", bulk_gaps)
+    # writedlm("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/access_results/mid_gaps.txt", mid_gaps)
+    # writedlm("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/access_results/outer_gaps.txt", outer_gaps)
+    # writedlm("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/access_results/mu_vals.txt", df[!, mu_col])
 
     return mid_gaps, outer_gaps, bulk_gaps
 end
@@ -435,7 +435,7 @@ function compute_qc_gaps_direct(
 
     # Get sorted eigenvalues at that mu
     eigs_at_mu = sort(df[idx, eig_col])
-    writedlm("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/access_results/eigs_at_mu_mu$(mu_val)_N$(N_val).txt", eigs_at_mu)
+    # writedlm("/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/access_results/eigs_at_mu_mu$(mu_val)_N$(N_val).txt", eigs_at_mu)
 
     n_eigs = length(eigs_at_mu)
     

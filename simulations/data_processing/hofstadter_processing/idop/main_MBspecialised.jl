@@ -65,7 +65,7 @@ base_results_dir = normpath(joinpath(@__DIR__, "..", "..", "..", "results", "bp_
 unpack_mode = :load_slope
 # ---------------------------
 
-eig_save_mode = :all        # Options: :all (full spectrum), :maj (central 2 only)
+eig_save_mode = :maj        # Options: :all (full spectrum), :maj (central 2 only)
 mirror_data_about_mu0 = true  # Whether to mirror data about mu=0 for unpacking
 
 # Define ranges for repacking or plotting -- otherwise the full range will be used.

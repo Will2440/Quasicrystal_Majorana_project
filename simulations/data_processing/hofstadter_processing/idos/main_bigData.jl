@@ -35,8 +35,8 @@ using .IDOSProcessing
 ######################################
 
 ## Determine the data folder for saving, should be consistent with raw data location
-data_folder = "hof_style_slopes_N1000_phason_0.0-101-1.0_nbins1000_npb1_N(500-500-1)_t1(1p0-1p0-1)_t2(2p0-2p0-1)_mu(0p0-0p0-1)_Delta(0p05-0p05-1)"
-run_set_name = "MBData_final"
+data_folder = "hof_style_slopes_N500_phason_0.0-101-1.0_nbins1000_npb1_N(500-500-1)_t1(1p0-1p0-1)_t2(1p5-1p5-1)_mu(-3p0-3p0-1201)_Delta(0p05-0p05-1)_EXTRADATA/"
+run_set_name = "butterfly_data"
 # data_folder = "hof_style_slopes_N500_phason_0.0-101-1.0_nbins1000_npb1_N(500-500-1)_t1(1p0-1p0-1)_t2(2p0-5p0-7)_mu(0p0-0p0-1)_Delta(0p05-0p5-6)"
 # run_set_name = "hof_style_slopes" 
 # data_folder = "hof_style_slopes_N400_target_0.61803_tol_0.001_phason_0.0-101-1.0_nbins1000_npb1_N(200-200-1)_t1(1p0-1p0-1)_t2(1p5-1p5-1)_mu(0p0-3p0-1201)_Delta(0p05-0p05-1)"
@@ -59,7 +59,7 @@ repack_mu_range = nothing #[0.0, 0.5, 1.0, 2.0]
 ## Defines base_slice_dir for accessing slices using this script
 base_slice_dir = normpath(joinpath(base_results_dir, "idos_base_slices", "mu_range$(repack_mu_range)"))
 
-unpack_mode = :by_phason #:by_slope or :by_phason
+unpack_mode = :by_slope #:by_slope or :by_phason
 
 unpack_data = true  # Set to true to unpack data, false to process existing slices
 fixed_param = nothing
@@ -375,11 +375,11 @@ plt_slope = nothing #0.6180048661800487
         max_out_col=:global_max
     )
     
-    # # Create norm_save_df: Keep only parameter columns + global_min/global_max, remove all others
-    # parameter_cols = [:phi, :phason, :mu, :Delta, :t_n, :N]  # Core parameter columns (adjust if your df_slice has different names)
-    # norm_save_df = select(df_slice, parameter_cols..., :global_min, :global_max)
-    # norm_save_path = joinpath(outdir, "eigs_bandwidth_norms_mu$(mu_val)_Delta$(Delta)_t_n$(t_n)_$(loop_fixed_desc).csv")
-    # CSV.write(norm_save_path, norm_save_df)
+    # Create norm_save_df: Keep only parameter columns + global_min/global_max, remove all others
+    parameter_cols = [:phi, :phason, :mu, :Delta, :t_n, :N]  # Core parameter columns (adjust if your df_slice has different names)
+    norm_save_df = select(df_slice, parameter_cols..., :global_min, :global_max)
+    norm_save_path = joinpath(outdir, "eigs_bandwidth_norms_mu$(mu_val)_Delta$(Delta)_t_n$(t_n)_$(loop_fixed_desc).csv")
+    CSV.write(norm_save_path, norm_save_df)
 
     
         ## b) By linear interpolation

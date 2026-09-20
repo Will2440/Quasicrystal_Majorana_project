@@ -42,17 +42,19 @@
 """
 
 module LocalSolv
-export hp_generic_solver, np_generic_solver, np_mu_rho_restricted_solver, np_seq_scaled_solver, UserOptions
+export hp_generic_solver, np_generic_solver, np_mu_rho_restricted_solver, np_seq_scaled_solver, np_specloc_solver, UserOptions
 
 using GenericLinearAlgebra
 using LinearAlgebra
 # using Arpack
-# using SparseArrays
+using SparseArrays
 using Base.Threads
 using DataFrames
 # using BSON: @save, @load
 using JLD2: @save, @load
 using ProgressMeter
+using KrylovKit
+using LDLFactorizations
 
 
 struct UserOptions
@@ -653,7 +655,7 @@ function np_close_projector_loop!(acc::ProjectorWindingAccumulator)
 end
 
 
-function np_calc_specloc_gap(
+function np_calc_specloc_gap_Krylov(
     L::Union{SparseMatrixCSC{Float64, Int}, Matrix};
     m_evals::Int=1,
     kk_tol::Real=1e-8,
@@ -669,6 +671,79 @@ function np_calc_specloc_gap(
     
     localiser_gap = sqrt(abs(evals[1]))
     return localiser_gap
+end
+
+function np_calc_specloc_winding_LDLT(
+    L::Union{SparseMatrixCSC{Float64, Int}, Matrix};
+    zero_tol::Float64=1e-10,
+    imag_tol::Float64=1e-10
+)::Float64
+
+    # The 1D Kitaev localiser should be real-symmetric. Enforce that numerically.
+    A = Matrix(L)
+    if eltype(A) <: Complex
+        max_imag = maximum(abs.(imag.(A)))
+        if max_imag > imag_tol
+            error("np_calc_specloc_winding_LDLT: localiser has non-negligible imaginary part (max |Im| = $(max_imag)).")
+        end
+        A = real.(A)
+    end
+
+    # Pivoted symmetric-indefinite LDL^T (Bunch-Kaufman): P' * A * P = L * D * L'.
+    # By Sylvester's law, inertia(A) == inertia(D).
+    F = bunchkaufman(Symmetric(A); check=false)
+    if !issuccess(F)
+        error("np_calc_specloc_winding_LDLT: Bunch-Kaufman factorization failed.")
+    end
+
+    D = F.D
+    n = size(D, 1)
+
+    n_pos = 0
+    n_neg = 0
+    i = 1
+
+    while i <= n
+        # In Bunch-Kaufman, D is block diagonal with 1x1 and 2x2 blocks.
+        if i < n && (abs(D[i, i + 1]) > zero_tol || abs(D[i + 1, i]) > zero_tol)
+            a = D[i, i]
+            b = D[i, i + 1]
+            c = D[i + 1, i]
+            d = D[i + 1, i + 1]
+
+            tr = a + d
+            disc = sqrt((a - d)^2 + 4 * b * c)
+            λ1 = 0.5 * (tr + disc)
+            λ2 = 0.5 * (tr - disc)
+
+            if λ1 > zero_tol
+                n_pos += 1
+            elseif λ1 < -zero_tol
+                n_neg += 1
+            end
+
+            if λ2 > zero_tol
+                n_pos += 1
+            elseif λ2 < -zero_tol
+                n_neg += 1
+            end
+
+            i += 2
+        else
+            v = D[i, i]
+            if v > zero_tol
+                n_pos += 1
+            elseif v < -zero_tol
+                n_neg += 1
+            end
+            i += 1
+        end
+    end
+
+    sig = n_pos - n_neg
+    winding = sig / 2.0
+
+    return winding
 end
 
 function np_calc_specloc_full(
@@ -1818,7 +1893,10 @@ function np_specloc_solver(
     chunk_size::Int,
     filepath::String,
     opts::UserOptions,
-    row_index::Union{Int,Nothing}
+    row_index::Union{Int,Nothing},
+    x0s::Vector{Float64},
+    kappas::Vector{Float64}
+    # gap_tol::Float64
 )
     # allocate by maxthreadid (not nthreads) to cover all possible thread ids
     maxid = Threads.maxthreadid()
@@ -1835,16 +1913,16 @@ function np_specloc_solver(
         # loc_len = Float64[],
         # eigenvalues = Union{Vector{Float64}, Missing}[],
         # eigenvectors = Union{Matrix{Float64}, Missing}[]
-        specloc_winding = Float64[],
-        specloc_gap = Float64[],
-        specloc_spectrum = Union{Vector{Float64}, Missing}[]
+        specloc_winding = Float64[], #Vector{Float64}[],
+        specloc_gap = Float64[], #Vector{Float64}[],
+        specloc_spectrum = Union{Vector{Float64}, Missing}[],
+        kappa = Float64[],
+        x0 = Float64[],
     ) for _ in 1:maxid]
     thread_local_chunks = ones(Int, maxid)
 
-    x0s = opts.x0s
-    kappas = opts.kappas
 
-    Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)), length(x0s), length(kappas))
+    @showprogress Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences), length(x0s), length(kappas)))
         tid = Threads.threadid()
         results_df = thread_local_results[tid]
         chunk_idx = thread_local_chunks[tid]
@@ -1859,36 +1937,39 @@ function np_specloc_solver(
         x0 = x0s[idx[6]]
         kappa = kappas[idx[7]]
 
+        # # overwrite
+        # x0 = round(Int, N/2)
+
+        # # solve for cluster of x0s near midpoint
+        # x0s = collect(max(1, round(Int, N/2) - 5):min(N, round(Int, N/2) + 5))
+
         # Solve
         truncated_sequence = Vector(sequence[1:N])
         H_BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
         
         X, Gamma = build_operators_block_basis(N)
 
-        # for x0 in opts.xs, kappa in opts.kappas
-                    
-        # X - x0 is diagonal, allowing fast vectorized math
-        X_diff = sparse(Diagonal(X.diag .- x0))
-        
-        # Assemble the 1D Spectral localiser
-        L = kappa .* (Gamma * X_diff) + H_BdG
+        # specloc_windings = Float64[]
+        # specloc_gaps = Float64[]
+            
+        # for x0 in x0s
+            # X - x0 is diagonal, allowing fast vectorized math
+            X_diff = sparse(Diagonal(X.diag .- x0))
+            
+            # Assemble the 1D Spectral localiser
+            L = kappa .* (Gamma * X_diff) + H_BdG
 
-        winding_val, gap, spectrum = np_calc_specloc_full(L)
+            ## Slow but correct 
+            winding_val, gap, spectrum = np_calc_specloc_full(L)
 
-        # # If the localiser gap closes, treat invariant as ill-defined (missing)
-        # winding_number = if gap <= opts.spec_loc_gap_tol
-        #     missing
-        # else
-        #     winding_val
+            # ## Fast untested
+            # gap = np_calc_specloc_gap_Krylov(L, m_evals=1)
+            # winding_val = np_calc_specloc_winding_LDLT(L)
+
+        #     push!(specloc_windings, winding_val)
+        #     push!(specloc_gaps, gap)
         # end
-        # end
 
-        # evals, evecs = LinearAlgebra.eigen(Hermitian(BdG))
-
-        # mp = opts.calc_mp ? np_calc_maj_mp(evecs) : NaN
-        # gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
-        # ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
-        # loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
 
         push!(results_df, (
             N = N,
@@ -1905,11 +1986,13 @@ function np_specloc_solver(
             # eigenvectors = eigenvectors_to_save
             specloc_winding = winding_val,
             specloc_gap = gap,
-            specloc_spectrum = spectrum
+            specloc_spectrum = spectrum,
+            kappa = kappa,
+            x0 = x0,
         ))
 
         if nrow(results_df) >= chunk_size
-            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
             empty!(results_df)
             thread_local_chunks[tid] = chunk_idx + 1
@@ -1921,7 +2004,7 @@ function np_specloc_solver(
         results_df = thread_local_results[tid]
         if nrow(results_df) > 0
             chunk_idx = thread_local_chunks[tid]
-            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
         end
     end

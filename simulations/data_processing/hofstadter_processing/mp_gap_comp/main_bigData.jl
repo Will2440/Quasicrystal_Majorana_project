@@ -11,6 +11,7 @@ using Colors, ColorSchemes, Plots
 using ProgressMeter
 using LaTeXStrings
 using CSV
+using Statistics
 
 # Set logger level from JULIA_LOG_LEVEL environment variable, default to Info if not set
 level_str = uppercase(get(ENV, "JULIA_LOG_LEVEL", "info"))
@@ -40,6 +41,183 @@ using .IDOPProcessing
 using .IDOSProcessing
 
 
+function filter_isolated_states_density(
+    eigs::AbstractVector{<:Real};
+    gap_factor::Float64=6.0,
+    min_band_size::Int=2,
+    min_abs_gap::Float64=0.0
+)
+    vals = sort(Float64.(real.(eigs)))
+    n = length(vals)
+    n <= min_band_size + 1 && return vals
+
+    spacings = diff(vals)
+    positive_spacings = filter(>(eps(Float64)), spacings)
+    isempty(positive_spacings) && return vals
+
+    typical_spacing = median(positive_spacings)
+    gap_threshold = max(min_abs_gap, gap_factor * typical_spacing)
+
+    split_after = findall(>(gap_threshold), spacings)
+
+    start_idx = 1
+    kept_segments = Vector{Vector{Float64}}()
+    removed_states = 0
+    for split_idx in split_after
+        segment = vals[start_idx:split_idx]
+        if length(segment) >= min_band_size
+            push!(kept_segments, segment)
+        else
+            removed_states += length(segment)
+        end
+        start_idx = split_idx + 1
+    end
+
+    tail_segment = vals[start_idx:end]
+    if length(tail_segment) >= min_band_size
+        push!(kept_segments, tail_segment)
+    else
+        removed_states += length(tail_segment)
+    end
+
+    filtered = isempty(kept_segments) ? vals : reduce(vcat, kept_segments)
+    return filtered
+end
+
+function family_key_from_combo(combo_key)
+    N_val, Delta_val, t_n_tuple, phi_val, phason_val = combo_key
+    return (Delta_val, t_n_tuple, phi_val, phason_val)
+end
+
+function extract_mu_spectrum(df::DataFrame; mu_target::Float64=0.0, mu_col::Symbol=:mu, eig_col::Symbol=:eigenvalues)
+    mu_vals = df[!, mu_col]
+    isempty(mu_vals) && return Float64[]
+    _, idx = findmin(abs.(mu_vals .- mu_target))
+    eigs = df[idx, eig_col]
+    return sort(Float64.(real.(eigs)))
+end
+
+function build_cross_n_reference_cache(combo_to_files, target_family_keys; mu_target::Float64=0.0)
+    family_cache = Dict{Any, Vector{Tuple{Int, Vector{Float64}}}}()
+
+    for (combo_key, file_path) in combo_to_files
+        family_key = family_key_from_combo(combo_key)
+        family_key in target_family_keys || continue
+
+        data = BSON.load(file_path)
+        df_slice = data[:df_slice]
+        spectrum = extract_mu_spectrum(df_slice; mu_target=mu_target)
+        isempty(spectrum) && continue
+
+        N_val = combo_key[1]
+        if !haskey(family_cache, family_key)
+            family_cache[family_key] = Tuple{Int, Vector{Float64}}[]
+        end
+        push!(family_cache[family_key], (N_val, spectrum))
+    end
+
+    for refs in values(family_cache)
+        sort!(refs, by=first)
+    end
+
+    return family_cache
+end
+
+function filter_isolated_states_cross_n(
+    eigs::AbstractVector{<:Real},
+    current_N::Int,
+    reference_pairs::Vector{Tuple{Int, Vector{Float64}}};
+    gap_factor::Float64=6.0,
+    min_band_size::Int=2,
+    min_abs_gap::Float64=0.0,
+    support_window_factor::Float64=3.0,
+    support_min_abs_window::Float64=0.0,
+    min_supported_sizes::Int=2,
+    avg_density_threshold::Float64=1.5
+)
+    vals = sort(Float64.(real.(eigs)))
+    n = length(vals)
+    n <= min_band_size + 1 && return vals, (cluster_count=1, kept_small_clusters=0, removed_small_clusters=0, typical_spacing=NaN, support_window=NaN)
+
+    spacings = diff(vals)
+    positive_spacings = filter(>(eps(Float64)), spacings)
+    isempty(positive_spacings) && return vals, (cluster_count=1, kept_small_clusters=0, removed_small_clusters=0, typical_spacing=NaN, support_window=NaN)
+
+    typical_spacing = median(positive_spacings)
+    gap_threshold = max(min_abs_gap, gap_factor * typical_spacing)
+    support_window = max(support_min_abs_window, support_window_factor * typical_spacing)
+
+    higher_refs = filter(ref -> ref[1] > current_N, reference_pairs)
+    fallback_refs = filter(ref -> ref[1] != current_N, reference_pairs)
+    refs_to_use = isempty(higher_refs) ? fallback_refs : higher_refs
+
+    split_after = findall(>(gap_threshold), spacings)
+    start_idx = 1
+    kept_segments = Vector{Vector{Float64}}()
+    kept_small_clusters = 0
+    removed_small_clusters = 0
+    cluster_count = 0
+
+    function maybe_keep_segment(segment)
+        if length(segment) >= min_band_size
+            return true
+        end
+
+        isempty(refs_to_use) && return false
+
+        E_low = first(segment)
+        E_high = last(segment)
+        supported_sizes = 0
+        total_local_count = 0
+
+        for (_, ref_eigs) in refs_to_use
+            local_count = count(x -> (x >= E_low - support_window) && (x <= E_high + support_window), ref_eigs)
+            total_local_count += local_count
+            supported_sizes += local_count > 0
+        end
+
+        avg_local_density = total_local_count / length(refs_to_use)
+        return supported_sizes >= min_supported_sizes && avg_local_density >= avg_density_threshold
+    end
+
+    for split_idx in split_after
+        segment = vals[start_idx:split_idx]
+        cluster_count += 1
+        keep_segment = maybe_keep_segment(segment)
+        if keep_segment
+            push!(kept_segments, segment)
+            if length(segment) < min_band_size
+                kept_small_clusters += 1
+            end
+        elseif length(segment) < min_band_size
+            removed_small_clusters += 1
+        end
+        start_idx = split_idx + 1
+    end
+    segment = vals[start_idx:end]
+    cluster_count += 1
+    keep_segment = maybe_keep_segment(segment)
+    if keep_segment
+        push!(kept_segments, segment)
+        if length(segment) < min_band_size
+            kept_small_clusters += 1
+        end
+    elseif length(segment) < min_band_size
+        removed_small_clusters += 1
+    end
+
+    filtered = isempty(kept_segments) ? vals : reduce(vcat, kept_segments)
+    diagnostics = (
+        cluster_count=cluster_count,
+        kept_small_clusters=kept_small_clusters,
+        removed_small_clusters=removed_small_clusters,
+        typical_spacing=typical_spacing,
+        support_window=support_window,
+    )
+    return filtered, diagnostics
+end
+
+
 ######################################
 ########## Path Determination ########
 ######################################
@@ -49,25 +227,26 @@ using .IDOSProcessing
 # run_set_name = "MBData_final"
 # data_folder = "hof_style_slopes_N500_phason_0.0-101-1.0_nbins1000_npb1_N(500-500-1)_t1(1p0-1p0-1)_t2(1p5-1p5-1)_mu(-3p0-3p0-1201)_Delta(0p05-0p05-1)"
 # run_set_name = "hof_style_slopes"
-data_folder = "hof_style_slopes_N400_target_0.61803_tol_0.001_phason_0.0-101-1.0_nbins1000_npb1_N(200-200-1)_t1(1p0-1p0-1)_t2(1p5-1p5-1)_mu(0p0-3p0-1201)_Delta(0p05-0p05-1)"
-run_set_name = "QC-SC_comp_small_L_check"
+data_folder = "hof_style_slopes_N1000_target_0.61803_tol_0.001_phason_0.0-1-0.0_nbins1000_npb1_N(100-1000-10)_t1(1p0-1p0-1)_t2(1p5-1p5-1)_mu(0p0-3p0-1201)_Delta(0p05-0p05-1)"
+run_set_name = "N_range_data"
 
 ## Ensure data is being lifted from the correct raw data folder
-folder_path_hof = normpath(joinpath(@__DIR__, "..", "..", "..", "raw_data", "bp_results", run_set_name, data_folder))
+folder_path_hof = normpath(joinpath(@__DIR__, "..", "..", "..", "raw_data", run_set_name, data_folder))
 
 ## Defines results directory for saving slices
-base_results_dir = normpath(joinpath(@__DIR__, "..", "..", "..", "results", "bp_results", run_set_name, data_folder))
+base_results_dir = normpath(joinpath(@__DIR__, "..", "..", "..", "results", run_set_name, data_folder))
 
 ######################################
 ############### Unpack? ##############
 ######################################
 
 # Define ranges for repacking or plotting -- otherwise the full range will be used.
-repack_N_range = nothing
+repack_N_range = [400]
+cross_n_unpack_N_range = collect(100:100:1000)
 repack_Delta_range = nothing
 repack_tn_range = nothing
 repack_phi_range = nothing #[0.6180048661800487]
-repack_phason_range = [0.53] #nothing
+repack_phason_range = nothing #[0.53]
 mu_plot_min, mu_plot_max = 0.0, 3.0 #nothing, nothing
 
 mp_targ = -1.0
@@ -88,7 +267,7 @@ sweep_results_dir = normpath(joinpath(base_results_dir, "mp_tol_sweeps", "mptarg
 # --- LOAD SWEEP LOOKUP INDEX ---
 sweep_lookup = Dict()
 sweep_index_path = joinpath(sweep_results_dir, "sweep_index.bson")
-sweep_index_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/results/bp_results/QC-SC_comp_small_L_check/hof_style_slopes_N400_target_0.61803_tol_0.001_phason_0.0-101-1.0_nbins1000_npb1_N(200-200-1)_t1(1p0-1p0-1)_t2(1p5-1p5-1)_mu(0p0-3p0-1201)_Delta(0p05-0p05-1)/mp_tol_sweeps/mptarg-1.0_mptolrange1.0e-10-1.0-1001_N_rangenothing_Delta_rangenothing_tn_rangenothing_phi_rangenothing_phason_range[0.53]/sweep_index.bson"
+sweep_index_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/results/bp_results/N_range_data/hof_style_slopes_N1000_target_0.61803_tol_0.001_phason_0.0-1-0.0_nbins1000_npb1_N(100-1000-10)_t1(1p0-1p0-1)_t2(1p5-1p5-1)_mu(0p0-3p0-1201)_Delta(0p05-0p05-1)/mp_tol_sweeps/mptarg-1.0_mptolrange1.0e-10-1.0-1001_N_rangenothing_Delta_rangenothing_tn_rangenothing_phi_rangenothing_phason_rangenothing/sweep_index.bson"
 if isfile(sweep_index_path)
     println("Loading sweep index from: $sweep_index_path")
     sweep_lookup = BSON.load(sweep_index_path)[:combo_to_file]
@@ -98,13 +277,13 @@ end
 # -------------------------------
 
 
-unpack_data = false  # Set to true to unpack data, false to process existing slices
+unpack_data = true  # Set to true to unpack data, false to process existing slices
 if unpack_data
     # Run unpacking and slicing
     combo_to_files = MPGapUnpacking.unpack_and_slice(folder_path_hof, base_slice_dir;
         mp_targ=mp_targ,
         mp_tol=mp_tol,
-        plt_N_range_arg=repack_N_range,
+            plt_N_range_arg=cross_n_unpack_N_range,
         plt_Delta_range_arg=repack_Delta_range,
         plt_tn_range_arg=repack_tn_range,
         plt_phi_range_arg=repack_phi_range,
@@ -124,11 +303,23 @@ end
 Delta=0.05
 idos_plateau_width_threshold = 0.025 #Delta #0.001
 N = 200
-idos_plateau_height_threshold = 2.5/N
+idos_plateau_height_threshold = 4/N #2.5/N
 idos_label_err_tol = 1.5/N
 idos_mp_tol = 0.1
 max_gap_label_value = 20
 max_idos_gap_label_value = max_gap_label_value
+
+# Automated filtering settings for isolated phason in-gap states.
+# A state cluster smaller than min_band_size and separated by > gap_factor * median spacing is removed.
+isolated_gap_factor = 6.0
+isolated_min_band_size = 3
+isolated_min_abs_gap = 0.0
+qc_mu_target = 0.0
+cross_n_filter_enabled = true
+cross_n_support_window_factor = 1.0
+cross_n_support_min_abs_window = 0.0
+cross_n_min_supported_sizes = 4
+cross_n_avg_density_threshold = 3.0
 
 normalise_type = :outer # :inner, :outer, :both
 plot_norm_or_not = :eigenvalues # :eigenvalues or :eigs_interp_norm
@@ -165,6 +356,13 @@ if !isnothing(test_index)
 else
     combos_to_process = collect(combo_to_files)
 end
+
+target_family_keys = Set(family_key_from_combo(combo_key) for (combo_key, _) in combos_to_process)
+cross_n_reference_cache = build_cross_n_reference_cache(
+    combo_to_files,
+    target_family_keys;
+    mu_target=qc_mu_target
+)
 
 
 @showprogress for ((N_val, Delta_val, t_n_tuple, phi_val, phason_val), f) in combos_to_process
@@ -552,7 +750,7 @@ end
         df_slice
     )
 
-    # println("got here 1")
+    println("got here 1")
 
     ## b) Load phason-independent spectra from IDOS results
     # This assumes the structure generated by idos/main_bigData.jl
@@ -604,41 +802,51 @@ end
     # --------------------------------------------------
 
 
-    ## manually remove some phason states from eigenvalues at mu=0.0
+    ## c) Automated removal of isolated in-gap states at mu=0.0
+    ## Uses phason-independent spectrum when available, then applies spacing-based clustering.
+    df_slice[!, :filtered_qc_eigenvalues] = copy(df_slice.eigenvalues)
 
-    # energies at which to remove states
-    remove_evals_nearest = [0.21, 0.25, 1.35, 1.39, 1.97, 1.99]
-    df_slice[!, :manual_eigenvalues] = copy(df_slice.eigenvalues)
-
-    # remove nearest eval to each target energy
-    mu0_row_idx = findfirst(df_slice.mu .== 0.0)
+    mu0_row_idx = findfirst(df_slice.mu .== qc_mu_target)
     if !isnothing(mu0_row_idx)
-        evals_at_mu0 = df_slice.eigenvalues[mu0_row_idx]
-        for target_eval in remove_evals_nearest
-            if !isempty(evals_at_mu0)
-                diffs = abs.(evals_at_mu0 .- target_eval)
-                nearest_idx = argmin(diffs)
-                eval_to_remove = evals_at_mu0[nearest_idx]
-                # create new df column called manual_eigenvalues with all evals except removed ones
-                new_evals = filter(x -> x != eval_to_remove, evals_at_mu0)
-                df_slice.manual_eigenvalues[mu0_row_idx] = new_evals
-                @info "Removed eval $eval_to_remove near target $target_eval at mu=0.0 for N=$N_val, Delta=$Delta_val, t_n=$t_n_tuple, phi=$phi_val, phason=$phason_val"
-                # update evals_at_mu0 for next iteration
-                evals_at_mu0 = new_evals
-            end
-        end
-    end
+        raw_eigs_at_mu0 = df_slice.eigenvalues[mu0_row_idx]
+        source_eigs = raw_eigs_at_mu0
 
-    # manually remove all evals within small windows
-    remove_evals_windows = [(1.1, 1.2)]
-    for (E_low, E_high) in remove_evals_windows
-        mu0_row_idx = findfirst(df_slice.mu .== 0.0)
-        if !isnothing(mu0_row_idx)
-            evals_at_mu0 = df_slice.manual_eigenvalues[mu0_row_idx]
-            new_evals = filter(x -> x < E_low || x > E_high, evals_at_mu0)
-            df_slice.manual_eigenvalues[mu0_row_idx] = new_evals
-            @info "Removed evals in window [$E_low, $E_high] at mu=0.0 for N=$N_val, Delta=$Delta_val, t_n=$t_n_tuple, phi=$phi_val, phason=$phason_val"
+        if !isempty(df_slice.phason_indep_eigs[mu0_row_idx])
+            source_eigs = df_slice.phason_indep_eigs[mu0_row_idx]
         end
+
+        filtered_eigs = sort(Float64.(real.(source_eigs)))
+        filter_diag = (cluster_count=1, kept_small_clusters=0, removed_small_clusters=0, typical_spacing=NaN, support_window=NaN)
+        family_key = (Delta_val, t_n_tuple, phi_val, phason_val)
+        reference_pairs = get(cross_n_reference_cache, family_key, Tuple{Int, Vector{Float64}}[])
+
+        if cross_n_filter_enabled
+            filtered_eigs, filter_diag = filter_isolated_states_cross_n(
+                source_eigs,
+                N_val,
+                reference_pairs;
+                gap_factor=isolated_gap_factor,
+                min_band_size=isolated_min_band_size,
+                min_abs_gap=isolated_min_abs_gap,
+                support_window_factor=cross_n_support_window_factor,
+                support_min_abs_window=cross_n_support_min_abs_window,
+                min_supported_sizes=cross_n_min_supported_sizes,
+                avg_density_threshold=cross_n_avg_density_threshold
+            )
+        else
+            filtered_eigs = filter_isolated_states_density(
+                source_eigs;
+                gap_factor=isolated_gap_factor,
+                min_band_size=isolated_min_band_size,
+                min_abs_gap=isolated_min_abs_gap
+            )
+        end
+
+        df_slice.filtered_qc_eigenvalues[mu0_row_idx] = filtered_eigs
+
+        @info "Automated isolated-state filtering at mu=$(qc_mu_target): source_states=$(length(source_eigs)), filtered_states=$(length(filtered_eigs)), removed=$(length(source_eigs) - length(filtered_eigs)), clusters=$(filter_diag.cluster_count), kept_small=$(filter_diag.kept_small_clusters), removed_small=$(filter_diag.removed_small_clusters), spacing=$(filter_diag.typical_spacing), window=$(filter_diag.support_window), refs=$(length(reference_pairs)) for N=$N_val, Delta=$Delta_val, t_n=$t_n_tuple, phi=$phi_val, phason=$phason_val"
+    else
+        @warn "No mu=$(qc_mu_target) row found; using raw eigenvalues for QC gap extraction for N=$N_val, Delta=$Delta_val, t_n=$t_n_tuple, phi=$phi_val, phason=$phason_val"
     end
 
     # ## c) Compute QC gaps at mu=0.0 (CHOOSE ONE METHOD)
@@ -654,8 +862,8 @@ end
     # println("got here 2")
     E_range, qc_gaps_direct_robust = MPGapProcessing.compute_qc_gaps_direct(
         df_slice;
-        mu_val=0.0,
-        eig_col=:manual_eigenvalues,
+        mu_val=qc_mu_target,
+        eig_col=:filtered_qc_eigenvalues,
         # eig_tol=1e-9,
         N_val=N_val
     )
@@ -699,7 +907,7 @@ end
     try
         println("got here 3")
         logscale=false
-        filename = "MANUAL_bulk_vs_qc_gaps_robust_from_eigs_robust_direct_logscale$(logscale)_phi$(phi_val)_N$(N_val)_Delta$(Delta_val)_tn$(join(t_n, "_"))_phason$(phason_val)"
+        filename = "NNAUTO_bulk_vs_qc_gaps_robust_from_eigs_robust_direct_logscale$(logscale)_phi$(phi_val)_N$(N_val)_Delta$(Delta_val)_tn$(join(t_n, "_"))_phason$(phason_val)"
         savepath = joinpath(bulk_vs_qc_gap_plt_outdir, "$(filename).svg")
         println("Plotting to: ", savepath)
         MPGapPlotting.plt_bulk_vs_qc_gaps(
@@ -719,7 +927,7 @@ end
     ## b) Plot bulk vs QC gap difference from robust bulk and QC gaps
     try
         println("got here 4")
-        filename = "MANUAL_bulk_vs_qc_gaps_robust_direct_diff_phi$(phi_val)_N$(N_val)_Delta$(Delta_val)_tn$(join(t_n, "_"))_phason$(phason_val)"
+        filename = "NNAUTO_bulk_vs_qc_gaps_robust_direct_diff_phi$(phi_val)_N$(N_val)_Delta$(Delta_val)_tn$(join(t_n, "_"))_phason$(phason_val)"
         savepath = joinpath(bulk_vs_qc_gap_plt_outdir, "$(filename).svg")
         MPGapPlotting.plt_bulk_vs_qc_diff(
             df_slice.mu,

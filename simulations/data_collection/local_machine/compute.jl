@@ -30,7 +30,9 @@ function run_selected_solver(
 	sequence_ids=nothing, 
 	rho_target=1.5, 
 	tbar=1.5, 
-	preserve_symbol=:t1
+	preserve_symbol=:t1,
+	x0s=nothing,
+	kappas=nothing
 )
 
 	if opts.solver_type == :generic
@@ -91,6 +93,8 @@ function run_selected_solver(
 		else
             error("Unsupported precision mode: $(opts.calc_precision). Chose opts.calc_precision = :np")
         end
+	elseif opts.solver_type == :spec_loc
+		LocalSolv.np_specloc_solver(N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, sequence_ids, chunk_size, filepath, opts, nothing, x0s, kappas)
 	else
         error("Unknown solver type: $(opts.solver_type)")
     end

@@ -2,6 +2,7 @@ plots_masters_thesis/
 final_data_masters_thesis/
 # *.json
 *.png
+*.svg
 *.bson
 # *.gif
 # *.log

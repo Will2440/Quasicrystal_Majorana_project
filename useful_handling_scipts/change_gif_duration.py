@@ -35,8 +35,8 @@ def change_gif_duration(input_path, output_path, new_duration_ms):
 
 if __name__ == "__main__":
     # Option 1: Hardcode the paths and duration here (uncomment and set these)
-    input_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/results/bp_results/MBData_final/hof_style_slopes_N1000_phason_0.0-1-0.0_nbins1000_npb1_N(500-500-1)_t1(1p0-1p0-1)_t2(2p0-2p0-1)_mu(0p0-5p0-146627)_Delta(0p05-0p05-1)/mp_gap_comp/mptarg-1.0_mptol0.01_idos0.05,0.004,200_N_rangenothing_Delta_rangenothing_tn_rangenothing_phi_rangenothing_phason_range[0.0]/bulk_vs_qc_gaps/bulk_vs_qc_gaps_ordered_by_phi.gif"
-    output_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/results/bp_results/MBData_final/hof_style_slopes_N1000_phason_0.0-1-0.0_nbins1000_npb1_N(500-500-1)_t1(1p0-1p0-1)_t2(2p0-2p0-1)_mu(0p0-5p0-146627)_Delta(0p05-0p05-1)/mp_gap_comp/mptarg-1.0_mptol0.01_idos0.05,0.004,200_N_rangenothing_Delta_rangenothing_tn_rangenothing_phi_rangenothing_phason_range[0.0]/bulk_vs_qc_gaps/bulk_vs_qc_gaps_ordered_by_phi_fast.gif"
+    input_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/working_notebooks/PRB_test_results/eigs_vs_mu/N250/svg/eigenvalues_vs_mu_ordered_by_slope.gif"
+    output_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/working_notebooks/PRB_test_results/eigs_vs_mu/N250/svg/eigenvalues_vs_mu_ordered_by_slope_fast.gif"
     new_duration = 100  # New duration in milliseconds per frame
     
     # os.makedirs(os.path.dirname(output_path), exist_ok=True)
