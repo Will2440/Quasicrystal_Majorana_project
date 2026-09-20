@@ -1,0 +1,11 @@
+cpu-bind=MASK - bp1-compute092, task  0  0 [1264876]: mask 0x40000040 set
+  Activating project at `/user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search`
+ERROR: LoadError: No worker results found in /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/runs/dynamic_mb_search_20260920_155628/iter_001/results
+Stacktrace:
+ [1] error(s::String)
+   @ Base ./error.jl:35
+ [2] main()
+   @ Main /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:624
+ [3] top-level scope
+   @ /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:732
+in expression starting at /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:732

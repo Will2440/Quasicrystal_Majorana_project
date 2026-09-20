@@ -1,0 +1,18 @@
+cpu-bind=MASK - bp1-compute092, task  0  0 [1273215]: mask 0x800000800000 set
+ERROR: LoadError: BoundsError: attempt to access 1-element Vector{Int64} at index [1000-element BitVector]
+Stacktrace:
+ [1] throw_boundserror(A::Vector{Int64}, I::Tuple{Base.LogicalIndex{Int64, BitVector}})
+   @ Base ./abstractarray.jl:737
+ [2] checkbounds
+   @ ./abstractarray.jl:702 [inlined]
+ [3] _getindex
+   @ ./multidimensional.jl:888 [inlined]
+ [4] getindex
+   @ ./abstractarray.jl:1291 [inlined]
+ [5] select_sequence(seqs::Vector{Vector{Int64}}, phis::Vector{Float64}, phasons::Vector{Float64}; target_slope::Float64, slope_tolerance::Float64, target_phason::Float64, phason_tolerance::Float64, selection_mode::Symbol)
+   @ Main.DynamicSequences /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/core/sequences.jl:42
+ [6] main()
+   @ Main /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/worker.jl:40
+ [7] top-level scope
+   @ /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/worker.jl:128
+in expression starting at /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/worker.jl:128

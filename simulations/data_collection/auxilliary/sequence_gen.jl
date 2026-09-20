@@ -1,6 +1,6 @@
 module SeqGen
 
-using ProgressMeter
+# using ProgressMeter
 using Random: AbstractRNG, MersenneTwister, shuffle!
 using DataFrames
 using BSON

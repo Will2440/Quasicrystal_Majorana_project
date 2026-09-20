@@ -1,0 +1,2 @@
+cpu-bind=MASK - bp1-compute196, task  0  0 [3192533]: mask 0x1fffe0001fffe set
+  Activating project at `/user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search_singlejob`

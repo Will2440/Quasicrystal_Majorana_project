@@ -4,6 +4,7 @@ final_data_masters_thesis/
 *.png
 *.svg
 *.bson
+*.jld2
 # *.gif
 # *.log
 raw_data/

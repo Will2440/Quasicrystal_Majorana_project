@@ -1,0 +1,31 @@
+cpu-bind=MASK - bp1-compute092, task  0  0 [1254292]: mask 0x800000800000 set
+  Activating project at `/user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search`
+ERROR: LoadError: IOError: could not spawn `sbatch--array=1-1%1--partitioncompute--accountphys030424--time00:30:00--mem4096M/user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/runscripts/worker_array.sbatch/user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/config/first_test_config.jl/user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/runs/dynamic_mb_search_20260920_153132/calibration`: no such file or directory (ENOENT)
+Stacktrace:
+  [1] _spawn_primitive(file::String, cmd::Cmd, stdio::Vector{Union{RawFD, IO}})
+    @ Base ./process.jl:128
+  [2] #784
+    @ ./process.jl:139 [inlined]
+  [3] setup_stdios(f::Base.var"#784#785"{Cmd}, stdios::Vector{Union{RawFD, IO}})
+    @ Base ./process.jl:223
+  [4] _spawn
+    @ ./process.jl:138 [inlined]
+  [5] open(cmds::Cmd, stdio::Base.DevNull; write::Bool, read::Bool)
+    @ Base ./process.jl:393
+  [6] open
+    @ ./process.jl:383 [inlined]
+  [7] open(cmds::Cmd, mode::String, stdio::Base.DevNull)
+    @ Base ./process.jl:364
+  [8] read(cmd::Cmd)
+    @ Base ./process.jl:447
+  [9] read
+    @ ./process.jl:458 [inlined]
+ [10] readchomp
+    @ ./io.jl:974 [inlined]
+ [11] calibrate_worker_resources(cfg::Dict{Symbol, Any}, config_path::String, run_root::String, stop_files::Vector{String})
+    @ Main /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:200
+ [12] main()
+    @ Main /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:515
+ [13] top-level scope
+    @ /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:732
+in expression starting at /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:732

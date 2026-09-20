@@ -1,0 +1,16 @@
+cpu-bind=MASK - bp1-compute092, task  0  0 [1263171]: mask 0x2000002000 set
+  Activating project at `/user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search`
+ERROR: LoadError: MethodError: no method matching wait_for_job_simple(::SubString{String}, ::Int64, ::Vector{String})
+
+Closest candidates are:
+  wait_for_job_simple(!Matched::String, ::Int64, ::Vector{String})
+   @ Main /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:118
+
+Stacktrace:
+ [1] calibrate_worker_resources(cfg::Dict{Symbol, Any}, config_path::String, run_root::String, stop_files::Vector{String})
+   @ Main /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:206
+ [2] main()
+   @ Main /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:515
+ [3] top-level scope
+   @ /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:732
+in expression starting at /user/work/hb21877/Quasicrystal_Majorana_project/simulations/data_collection/hpc_compatible/dynamic_search/master.jl:732

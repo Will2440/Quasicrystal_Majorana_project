@@ -20,6 +20,12 @@ function log_range(base::Float64, start_power::Float64, end_power::Float64, leng
     return values
 end
 
+function log_range(base::Float64, start_power::Float64, end_power::Float64, length::Int)
+    powers = range(start_power, stop=end_power, length=length)
+    values = base .^ powers
+    return values
+end
+
 # =====================================================================
 # User config (EDIT THESE)
 # =====================================================================
@@ -30,6 +36,7 @@ sequence_bson_file ="hof_style_slopes_N500_phason_0.0-1-0.0_nbins1000_npb1.bson"
 # Sequence selection
 sequence_selection = :target_slope  # :all, :user_range, :target_slope, :target_phason
 sequence_indices = 100:100  # only used if :user_range
+target_slope =  2/(1 + sqrt(5))  # only used if :target_slope
 target_slope =  2/(1 + sqrt(5))  # only used if :target_slope
 slope_tolerance = 0.001  # only used if :target_slope
 target_phason = 0.0  # only used if :target_phason
@@ -42,6 +49,19 @@ Deltas  = [0.05] #[0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]             # Vector{Flo
 t1s     = [1.0]                  # Vector{Float64}
 t2s     = collect(logrange(1.0, 2.5, 501)) #collect(range(1.0, 3.0, 1001)) #[1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 2.0, 2.5, 3.0] #[1.5] #, 3.0, 3.5, 4.0, 4.5, 5.0]             # Vector{Float64}
 t3s     = Float64[]                   # Vector{Float64} (empty = no t3)
+
+# Auto-mu configuration
+mu_range_mode = :user_defined       # :user_defined or :auto_mu
+auto_mu_full_range = false           # true: -mu_max to mu_max, false: 0 to mu_max
+auto_mu_preserve_resolution = true  # true: fixed mu resolution (variable number of mu points), false: fixed length(mus) (variable mu step size)
+auto_mu_resolution_param = 0.001    # Target step size (resolution)
+
+# Smart grouping configuration
+smart_sequence_grouping = false
+target_number_of_rows = 200 # Target number of rows (jobs) to generate
+###########################################################################################################################
+## N.B. when using :auto_mu mode, ensure slope_vals_per_row is small, as one mu range will be taken for all these slopes ##
+###########################################################################################################################
 
 # Auto-mu configuration
 mu_range_mode = :user_defined       # :user_defined or :auto_mu
