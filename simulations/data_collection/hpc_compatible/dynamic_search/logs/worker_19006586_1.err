@@ -1,0 +1,2 @@
+cpu-bind=MASK - bp1-compute087, task  0  0 [411115]: mask 0x400000400000 set
+mkdir: cannot create directory '/tmp/slurmd/logs': Permission denied
