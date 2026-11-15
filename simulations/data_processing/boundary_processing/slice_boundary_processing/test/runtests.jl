@@ -37,6 +37,11 @@ using .SliceBoundaryData
         @test nrow(boundaries) == 1
         @test boundaries.mu[1] == 0.5
         @test summary.gap_count[1] == 1
+        @test trivial_gap_counts(summary) == [0]
+        @test trivial_gap_counts(DataFrame(gap_count=[2.0000001])) == [1]
+        @test_throws ErrorException trivial_gap_counts(DataFrame(gap_count=[1.25]))
+        @test leading_step_edge_indices([0, 0, 1, 1, 2, 2]) == [1, 3, 5]
+        @test leading_step_edge_indices(Int[]) == Int[]
         @test nrow(samples) == 2
         @test all(samples.slice_index .== 1)
         @test first(SliceBoundaryData.available_slices(run_dir))[1] == 1

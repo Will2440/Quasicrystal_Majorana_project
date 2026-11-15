@@ -237,7 +237,8 @@ function plt_discrete_phase_projections(
         size=(800,800),
         xlims=xlims,
         ylims=ylims,
-        bg=:transparent,
+        bg=:white,
+        plot_color=:white,
         color=colorant"#440154",
     )
     # Overlay final regression line if provided
@@ -275,6 +276,12 @@ function plt_continuous_phase_projections(
     plt_ylims::Union{Tuple{Real,Real},Nothing}=nothing,
     clims::Tuple{Real,Real}=(-1.0, 0.0),
     cmap=:viridis,
+    plot_size::Tuple{Int,Int}=(5000, 5000),
+    render_mode::Symbol=:scatter,
+    markersize::Real=1.0,
+    marker::Symbol=:square,
+    ignore_mu_centreline::Bool=false,
+    mu_centreline_atol::Real=sqrt(eps(Float64)),
     fixed_values...
 )
     """
@@ -320,7 +327,8 @@ function plt_continuous_phase_projections(
             for i in 1:length(x_val)
                 x_p = x_val[i]
                 c_p = i <= length(c_val) ? c_val[i] : missing
-                if !ismissing(x_p) && !ismissing(c_p)
+                is_centreline = !ismissing(x_p) && ignore_mu_centreline && abs(Float64(x_p)) <= mu_centreline_atol
+                if !ismissing(x_p) && !ismissing(c_p) && !is_centreline
                     push!(x_points,     Float64(x_p))
                     push!(y_points,     Float64(y_val))
                     push!(color_points, Float64(c_p))
@@ -379,14 +387,10 @@ function plt_continuous_phase_projections(
         ylims = plt_ylims
     end
 
-    plt = Plots.scatter(
-        x_points, y_points;
-        marker_z=color_points,
+    plot_options = (
         color=cmap,
         clims=clims,
         colorbar=false,
-        markersize=1.0,
-        markerstrokewidth=0,
         legend=false,
         xlabel="",
         ylabel="",
@@ -394,11 +398,35 @@ function plt_continuous_phase_projections(
         axes=false,
         ticks=false,
         framestyle=:none,
-        size=(5000,5000),
+        size=plot_size,
         xlims=xlims,
         ylims=ylims,
-        bg=:transparent,
+        bg=:white,
+        plot_color=:white,
     )
+
+    if render_mode == :scatter
+        plt = Plots.scatter(
+            x_points, y_points;
+            marker_z=color_points,
+            marker=marker,
+            markersize=markersize,
+            markerstrokewidth=0,
+            plot_options...,
+        )
+    elseif render_mode == :raster
+        x_grid = sort(unique(x_points))
+        y_grid = sort(unique(y_points))
+        x_indices = Dict(x => i for (i, x) in enumerate(x_grid))
+        y_indices = Dict(y => i for (i, y) in enumerate(y_grid))
+        color_grid = fill(NaN, length(y_grid), length(x_grid))
+        for i in eachindex(color_points)
+            color_grid[y_indices[y_points[i]], x_indices[x_points[i]]] = color_points[i]
+        end
+        plt = Plots.heatmap(x_grid, y_grid, color_grid; plot_options...)
+    else
+        error("render_mode must be :scatter or :raster, got $render_mode")
+    end
 
     # Overlay final regression line if provided
     if final_line_data !== nothing

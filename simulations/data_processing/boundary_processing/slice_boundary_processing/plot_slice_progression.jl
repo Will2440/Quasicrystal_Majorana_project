@@ -1,5 +1,6 @@
 #!/usr/bin/env julia
 
+using DataFrames
 using Plots
 include(joinpath(@__DIR__, "slice_data.jl"))
 using .SliceBoundaryData
@@ -8,7 +9,7 @@ function usage()
     println("Usage: julia plot_slice_progression.jl <run_directory> [--save output_dir] [--interval N] [--max-slice N]")
 end
 
-function make_frame(samples, transitions, summary, slice_index::Int)
+function make_frame(samples, transitions, summary, slice_index::Int; show_transition_labels::Bool=false)
     axis = sweep_axis(summary)
     current_summary = filter(row -> row.slice_index <= slice_index, summary)
     current_transitions = filter(row -> row.slice_index <= slice_index, transitions)
@@ -16,7 +17,7 @@ function make_frame(samples, transitions, summary, slice_index::Int)
         xlabel=axis == :Delta ? "Δ" : "ρ = t₂/t₁",
         ylabel="μ",
         title="Slice search progression: through slice $slice_index",
-        legend=:topright,
+        legend=:topleft,
         size=(950, 650),
         dpi=110,
     )
@@ -32,18 +33,20 @@ function make_frame(samples, transitions, summary, slice_index::Int)
         subset = sort(filter(row -> row.track_id == track_id, current_transitions), axis)
         color = track_id == 0 ? :black : track_colors[mod1(track_id, length(track_colors))]
         label = track_id == 0 ? "Onset probes" : "Boundary track $track_id"
+        visible_label = show_transition_labels || track_id == 0 ? label : ""
         if nrow(subset) > 1 && track_id != 0
-            plot!(p, subset[!, axis], subset.mu; color=color, linewidth=1.5, label=label)
+            plot!(p, subset[!, axis], subset.mu; color=color, linewidth=1.5, label=visible_label)
         else
-            scatter!(p, subset[!, axis], subset.mu; color=color, markersize=3, label=label)
+            scatter!(p, subset[!, axis], subset.mu; color=color, markersize=3, label=visible_label)
         end
     end
 
     if !isempty(current_summary) && !isempty(visible_samples)
         latest = argmax(current_summary.slice_index)
+        latest_gap_count = trivial_gap_counts(current_summary)[latest]
         annotate!(p,
             minimum(current_summary[!, axis]), maximum(visible_samples.mu),
-            text("latest gap count: $(current_summary[latest, :gap_count])", 9, :left))
+            text("latest trivial gap count: $latest_gap_count", 9, :left))
     end
     return p
 end
@@ -54,6 +57,7 @@ function main()
     save_dir = nothing
     interval = 1
     max_slice = typemax(Int)
+    show_transition_labels = false
     i = 2
     while i <= length(ARGS)
         if ARGS[i] == "--save"
@@ -69,6 +73,8 @@ function main()
             i += 1
             i <= length(ARGS) || error("--max-slice requires an integer")
             max_slice = parse(Int, ARGS[i])
+        elseif ARGS[i] == "--show-transition-labels"
+            show_transition_labels = true
         else
             error("Unknown option: $(ARGS[i])")
         end
@@ -86,7 +92,7 @@ function main()
         if mod(position - 1, interval) != 0 && position != length(slices)
             continue
         end
-        p = make_frame(samples, transitions, summary, slice_index)
+        p = make_frame(samples, transitions, summary, slice_index; show_transition_labels=show_transition_labels)
         if save_dir === nothing
             display(p)
         else

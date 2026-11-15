@@ -419,7 +419,8 @@ function apply_outer_normalisation!(
     norm_filename::String; 
     target_col::Symbol=:mu_mp, 
     out_col::Symbol=:mu_mp_norm,
-    verbose_warnings::Bool=true
+    verbose_warnings::Bool=true,
+    reference_mu::Union{Nothing,Real}=nothing
 )
     """
         apply_outer_normalisation!(df::DataFrame, norm_filename::String; target_col::Symbol=:mu_mp, out_col::Symbol=:mu_mp_norm)
@@ -431,6 +432,7 @@ function apply_outer_normalisation!(
         - `norm_filename`: Path to the CSV file containing normalization parameters (:global_min, :global_max, and matching parameter columns like :phi, :phason, etc.).
         - `target_col`: Column in `df` containing vectors of values to normalize (default :mu_mp).
         - `out_col`: New column in `df` to store the normalized vectors (default :mu_mp_norm).
+        - `reference_mu`: When provided, select cache rows at this chemical potential before matching.
 
         # Behavior
         - Loads the normalization DataFrame from `norm_filename`.
@@ -441,6 +443,12 @@ function apply_outer_normalisation!(
     """
     # Load the normalization parameters from CSV
     norm_df = CSV.read(norm_filename, DataFrame)
+
+    if !isnothing(reference_mu)
+        :mu in propertynames(norm_df) || error("Normalization CSV missing mu column required for reference_mu")
+        norm_df = filter(row -> !ismissing(row.mu) && isapprox(row.mu, reference_mu; atol=1e-10, rtol=0), norm_df)
+        isempty(norm_df) && error("Normalization CSV has no rows at reference_mu=$reference_mu")
+    end
     
     # Prefer richer matching keys when available in both DataFrames.
     # This aligns behaviour with the IDOS workflow that saved the CSV.

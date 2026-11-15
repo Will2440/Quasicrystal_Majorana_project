@@ -42,7 +42,7 @@
 """
 
 module LocalSolv
-export hp_generic_solver, np_generic_solver, np_mu_rho_restricted_solver, np_seq_scaled_solver, np_specloc_solver, UserOptions
+export hp_generic_solver, np_generic_solver, np_mu_rho_restricted_solver, np_seq_scaled_solver, np_specloc_solver, np_specloc_fast_solver, UserOptions
 
 using GenericLinearAlgebra
 using LinearAlgebra
@@ -744,6 +744,87 @@ function np_calc_specloc_winding_LDLT(
     winding = sig / 2.0
 
     return winding
+end
+
+function np_calc_specloc_signature_sparse_ldlt_fast(
+    L::SparseMatrixCSC{Float64, Int};
+    max_shift_tries::Int=6,
+    base_shift::Float64=1e-12
+)::Int
+    M = Symmetric(L)
+    shift = 0.0
+
+    for _ in 0:max_shift_tries
+        try
+            F = ldlt(M; shift=shift)
+            Dvals = diag(sparse(F.LD))
+            n_pos = count(>(0.0), Dvals)
+            n_neg = count(<(0.0), Dvals)
+            return n_pos - n_neg
+        catch err
+            estr = string(typeof(err))
+            if err isa LinearAlgebra.ZeroPivotException || occursin("CHOLMOD", estr) || occursin("Pivot", estr)
+                shift = shift == 0.0 ? base_shift : shift * 10.0
+            else
+                rethrow(err)
+            end
+        end
+    end
+
+    vals = eigvals(Symmetric(Matrix(L)))
+    return count(vals .> 0.0) - count(vals .< 0.0)
+end
+
+function np_calc_specloc_low_lying_shift_invert(
+    L::SparseMatrixCSC{Float64, Int};
+    n_eigenpairs::Int=4,
+    kk_tol::Real=1e-8,
+    kk_maxiter::Int=300,
+    regularization::Float64=1e-10
+)::Vector{Float64}
+    n_eigenpairs > 0 || throw(ArgumentError("n_eigenpairs must be positive"))
+    n = size(L, 1)
+
+    try
+        F = lu(L)
+        L_inv_action(x) = F \ x
+        evals_inv, _, _ = eigsolve(
+            L_inv_action,
+            rand(Float64, n),
+            n_eigenpairs,
+            :LM;
+            ishermitian=true,
+            tol=kk_tol,
+            maxiter=kk_maxiter
+        )
+
+        low_vals = real.(1.0 ./ evals_inv)
+        sort!(low_vals, by=abs)
+        return low_vals[1:min(n_eigenpairs, length(low_vals))]
+    catch
+        L_reg = L + regularization * I(n)
+        try
+            F = lu(L_reg)
+            L_inv_action(x) = F \ x
+            evals_inv, _, _ = eigsolve(
+                L_inv_action,
+                rand(Float64, n),
+                n_eigenpairs,
+                :LM;
+                ishermitian=true,
+                tol=kk_tol,
+                maxiter=kk_maxiter
+            )
+
+            low_vals = real.(1.0 ./ evals_inv) .- regularization
+            sort!(low_vals, by=abs)
+            return low_vals[1:min(n_eigenpairs, length(low_vals))]
+        catch
+            vals = eigvals(Symmetric(Matrix(L)))
+            sort!(vals, by=abs)
+            return vals[1:min(n_eigenpairs, length(vals))]
+        end
+    end
 end
 
 function np_calc_specloc_full(
@@ -2005,6 +2086,107 @@ function np_specloc_solver(
         if nrow(results_df) > 0
             chunk_idx = thread_local_chunks[tid]
             file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
+            @save file_name results_df
+        end
+    end
+
+    return nothing
+end
+
+function np_specloc_fast_solver(
+    N_range::Vector{Int},
+    t_n_range::Vector{Vector{Float64}},
+    mu_range::Vector{Float64},
+    Delta_range::Vector{Float64},
+    sequences::Vector{Vector{Int}},
+    sequence_name::String,
+    sequence_ids::Vector{Tuple{Float64,Float64}},
+    chunk_size::Int,
+    filepath::String,
+    opts::UserOptions,
+    row_index::Union{Int,Nothing},
+    x0s::Vector{Float64},
+    kappas::Vector{Float64};
+    n_lowest_evals::Int=4,
+    kk_tol::Real=1e-8,
+    kk_maxiter::Int=300
+)
+    n_lowest_evals > 0 || throw(ArgumentError("n_lowest_evals must be positive"))
+
+    maxid = Threads.maxthreadid()
+    thread_local_results = [DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        sequence_id = Tuple{Float64,Float64}[],
+        specloc_winding = Float64[],
+        specloc_gap = Float64[],
+        specloc_spectrum = Union{Vector{Float64}, Missing}[],
+        specloc_low_evals = Vector{Float64}[],
+        kappa = Float64[],
+        x0 = Float64[],
+    ) for _ in 1:maxid]
+    thread_local_chunks = ones(Int, maxid)
+
+    @showprogress Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences), length(x0s), length(kappas)))
+        tid = Threads.threadid()
+        results_df = thread_local_results[tid]
+        chunk_idx = thread_local_chunks[tid]
+
+        N = N_range[idx[1]]
+        t_n = t_n_range[idx[2]]
+        mu = mu_range[idx[3]]
+        Delta = Delta_range[idx[4]]
+        sequence = sequences[idx[5]]
+        sequence_id = sequence_ids[idx[5]]
+        x0 = x0s[idx[6]]
+        kappa = kappas[idx[7]]
+
+        truncated_sequence = Vector(sequence[1:N])
+        H_BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
+        X, Gamma = build_operators_block_basis(N)
+        X_diff = sparse(Diagonal(X.diag .- x0))
+        L = sparse(real.(H_BdG)) + kappa .* (Gamma * X_diff)
+
+        low_evals = np_calc_specloc_low_lying_shift_invert(
+            L;
+            n_eigenpairs=n_lowest_evals,
+            kk_tol=kk_tol,
+            kk_maxiter=kk_maxiter
+        )
+        gap = minimum(abs.(low_evals))
+        winding = np_calc_specloc_signature_sparse_ldlt_fast(L) / 2.0
+
+        push!(results_df, (
+            N = N,
+            t_n = t_n,
+            mu = mu,
+            Delta = Delta,
+            sequence_name = sequence_name,
+            sequence_id = sequence_id,
+            specloc_winding = winding,
+            specloc_gap = gap,
+            specloc_spectrum = missing,
+            specloc_low_evals = low_evals,
+            kappa = kappa,
+            x0 = x0,
+        ))
+
+        if nrow(results_df) >= chunk_size
+            file_name = "$(filepath)_fast_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
+            @save file_name results_df
+            empty!(results_df)
+            thread_local_chunks[tid] = chunk_idx + 1
+        end
+    end
+
+    for tid in 1:maxid
+        results_df = thread_local_results[tid]
+        if nrow(results_df) > 0
+            chunk_idx = thread_local_chunks[tid]
+            file_name = "$(filepath)_fast_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
         end
     end

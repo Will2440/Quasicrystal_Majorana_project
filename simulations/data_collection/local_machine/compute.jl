@@ -32,7 +32,8 @@ function run_selected_solver(
 	tbar=1.5, 
 	preserve_symbol=:t1,
 	x0s=nothing,
-	kappas=nothing
+		kappas=nothing,
+		n_lowest_evals=4
 )
 
 	if opts.solver_type == :generic
@@ -95,6 +96,15 @@ function run_selected_solver(
         end
 	elseif opts.solver_type == :spec_loc
 		LocalSolv.np_specloc_solver(N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, sequence_ids, chunk_size, filepath, opts, nothing, x0s, kappas)
+	elseif opts.solver_type == :spec_loc_fast
+		if opts.calc_precision != :np
+			error("Unsupported precision mode: $(opts.calc_precision). Chose opts.calc_precision = :np")
+		end
+		LocalSolv.np_specloc_fast_solver(
+			N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name,
+			sequence_ids, chunk_size, filepath, opts, nothing, x0s, kappas;
+			n_lowest_evals=n_lowest_evals
+		)
 	else
         error("Unknown solver type: $(opts.solver_type)")
     end

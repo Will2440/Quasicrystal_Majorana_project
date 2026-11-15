@@ -3,7 +3,8 @@ module SliceBoundaryData
 using CSV
 using DataFrames
 
-export load_transitions, load_slice_summary, load_samples, available_slices, sweep_axis
+export load_transitions, load_slice_summary, load_samples, available_slices, sweep_axis,
+       trivial_gap_counts, leading_step_edge_indices
 
 function sweep_axis(summary)
     :sweep_parameter in propertynames(summary) || return :rho
@@ -40,6 +41,33 @@ function load_slice_summary(run_dir::AbstractString)
     all(name -> name in propertynames(df), required) || error("Unexpected slice summary columns in $path")
     sort!(df, [:rho])
     return df
+end
+
+function trivial_gap_counts(summary::AbstractDataFrame)
+    counts = Int[]
+    for (row_index, value) in enumerate(summary.gap_count)
+        ismissing(value) && error("Missing boundary count at slice-summary row $row_index")
+        count = try
+            Float64(value)
+        catch
+            error("Invalid boundary count at slice-summary row $row_index: $value")
+        end
+        isfinite(count) || error("Non-finite boundary count at slice-summary row $row_index: $value")
+        rounded = round(count)
+        isapprox(count, rounded; atol=1e-6, rtol=1e-8) ||
+            error("Boundary count at slice-summary row $row_index is not an integer: $value")
+        push!(counts, Int(rounded) - 1)
+    end
+    return counts
+end
+
+function leading_step_edge_indices(counts::AbstractVector{<:Integer})
+    isempty(counts) && return Int[]
+    indices = Int[1]
+    for index in 2:length(counts)
+        counts[index] > counts[index - 1] && push!(indices, index)
+    end
+    return indices
 end
 
 function available_slices(run_dir::AbstractString)

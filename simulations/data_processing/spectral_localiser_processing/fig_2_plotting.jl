@@ -6,9 +6,9 @@ using ProgressMeter
 using Statistics
 
 
-data_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/spec_loc_final/slopes_N10000_literal_0.61803_phason_0.61803-1-0.61803_mapto(2, 1)_N(200-200-1)_t1(1.0-1.0-1)_t2(1.5-1.5-1)_mu(0.0-3.0-301)_Delta(0.05-0.05-1)_kappa(0.005-0.015-11)_x0s(100.0-100.0-1)"
+data_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/spec_loc_qc-sc_comp/slopes_N10000_literal_0.61803_phason_0.61803-1-0.61803_mapto(2, 1)_N(500-500-1)_t1(1.0-1.0-1)_t2(1.5-1.5-1)_mu(0.0-3.0-501)_Delta(0.05-0.05-1)_kappa(0.00025-0.00025-1)_x0s(250.0-250.0-1)"
 
-output_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/results/spec_loc_final/slopes_N10000_literal_0.61803_phason_0.61803-1-0.61803_mapto(2, 1)_N(200-200-1)_t1(1.0-1.0-1)_t2(1.5-1.5-1)_mu(0.0-3.0-301)_Delta(0.05-0.05-1)_kappa(0.005-0.015-11)_x0s(100.0-100.0-1)"
+output_path = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/results/spec_loc_qc-sc_comp/slopes_N10000_literal_0.61803_phason_0.61803-1-0.61803_mapto(2, 1)_N(500-500-1)_t1(1.0-1.0-1)_t2(1.5-1.5-1)_mu(0.0-3.0-501)_Delta(0.05-0.05-1)_kappa(0.00025-0.00025-1)_x0s(250.0-250.0-1)"
 isdir(output_path) || mkpath(output_path)
 println("Output path: $output_path")
 
@@ -57,6 +57,17 @@ end
 
 df = process_jld2_files_fluid(data_path)
 
+function get_specloc_eigenvalues(rows::DataFrame)
+    full_spectra = rows.specloc_spectrum
+    low_evals = :specloc_low_evals in propertynames(rows) ? rows.specloc_low_evals : fill(missing, nrow(rows))
+
+    return [
+        spectrum isa AbstractVector ? spectrum :
+        (low_evals[i] isa AbstractVector ? low_evals[i] : missing)
+        for (i, spectrum) in enumerate(full_spectra)
+    ]
+end
+
 function plt_spectrum_and_sig(
     df::DataFrame,
     filename::String;
@@ -93,7 +104,7 @@ function plt_spectrum_and_sig(
     x_data = sorted_rows[!, x_var]
     
     # Extract spectrum data and invariant
-    spectrum_data = sorted_rows.specloc_spectrum
+    spectrum_data = get_specloc_eigenvalues(sorted_rows)
     invariant_col = :specloc_winding #:specloc_gap #
     invariant_data = sorted_rows[!, invariant_col]
     
@@ -125,7 +136,7 @@ function plt_spectrum_and_sig(
                   markersize=1,
                   color=:blue,
                   alpha=0.6,
-                  ylims = (-0.5, 0.5)
+                  ylims = (-0.1, 0.1)
                 )
         end
     end
@@ -181,7 +192,7 @@ function plt_spectrum_and_sig_shaded(
     x_data = sorted_rows[!, x_var]
     
     # Extract spectrum data and invariant
-    spectrum_data = sorted_rows.specloc_spectrum
+    spectrum_data = get_specloc_eigenvalues(sorted_rows)
     invariant_col = :specloc_winding
     invariant_data = sorted_rows[!, invariant_col]
     
@@ -191,7 +202,9 @@ function plt_spectrum_and_sig_shaded(
     end
     
     # Determine y-axis range from all spectrum data
-    all_spectrum_vals = vcat([s for s in spectrum_data if s isa Vector]...)
+    available_spectra = [s for s in spectrum_data if s isa AbstractVector && !isempty(s)]
+    isempty(available_spectra) && error("No full spectra or low-lying eigenvalues are available for the selected rows.")
+    all_spectrum_vals = vcat(available_spectra...)
     y_min, y_max = minimum(all_spectrum_vals), maximum(all_spectrum_vals)
     y_range = range(y_min, y_max, length=100)
     
@@ -212,35 +225,95 @@ function plt_spectrum_and_sig_shaded(
         title="", #"Spectral Localiser Spectrum and $(invariant_col) vs $(x_var)",
         colorbar=false,
         color=:Blues,
-        ylims=(-0.5, 0.5),
+        ylims=(-0.1, 0.1),
         xlims=(0.0, 3.0),
         axis=false,
         legend=false,
         size=(1000,200)
     )
     
-    # Sort eigenvalues at each x_var value and prepare for line plotting
-    sorted_spectra = [sort(s) for s in spectrum_data]
-    
-    # Get maximum number of eigenvalues
-    max_evals = maximum(length(s) for s in sorted_spectra if s isa Vector)
-    
-    # Create line for each eigenvalue branch (index)
-    for eval_idx in 1:max_evals
-        x_branch = Float64[]
-        y_branch = Float64[]
-        
-        for (i, spectrum) in enumerate(sorted_spectra)
-            if spectrum isa Vector && eval_idx <= length(spectrum)
-                push!(x_branch, x_data[i])
-                push!(y_branch, spectrum[eval_idx])
+    negative_spectra = [
+        s isa AbstractVector ? sort(filter(value -> value < 0, s); rev=true) : Float64[]
+        for s in spectrum_data
+    ]
+    positive_spectra = [
+        s isa AbstractVector ? sort(filter(value -> value > 0, s)) : Float64[]
+        for s in spectrum_data
+    ]
+
+    branch_x = Vector{Vector{Float64}}()
+    branch_y = Vector{Vector{Float64}}()
+    negative_branch_ids = Int[]
+    positive_branch_ids = Int[]
+    previous_negative_count = 0
+    previous_nearest = NaN
+
+    for i in eachindex(x_data)
+        negative = negative_spectra[i]
+        positive = positive_spectra[i]
+
+        if i == 1
+            negative_branch_ids = collect(1:length(negative))
+            positive_branch_ids = collect((length(negative) + 1):(length(negative) + length(positive)))
+            branch_count = length(negative) + length(positive)
+            branch_x = [Float64[] for _ in 1:branch_count]
+            branch_y = [Float64[] for _ in 1:branch_count]
+        else
+            count_change = length(negative) - previous_negative_count
+            spectrum = spectrum_data[i]
+            nearest = spectrum isa AbstractVector && !isempty(spectrum) ? spectrum[argmin(abs.(spectrum))] : NaN
+            nearest_crossed_zero = isfinite(previous_nearest) && isfinite(nearest) &&
+                                   signbit(previous_nearest) != signbit(nearest)
+            is_zero_crossing = abs(count_change) == 1 && nearest_crossed_zero
+
+            if is_zero_crossing && count_change > 0
+                crossing_branch = popfirst!(positive_branch_ids)
+                pushfirst!(negative_branch_ids, crossing_branch)
+            elseif is_zero_crossing && count_change < 0
+                crossing_branch = popfirst!(negative_branch_ids)
+                pushfirst!(positive_branch_ids, crossing_branch)
             end
+
+            while length(negative_branch_ids) < length(negative)
+                push!(branch_x, Float64[])
+                push!(branch_y, Float64[])
+                push!(negative_branch_ids, length(branch_x))
+            end
+            while length(negative_branch_ids) > length(negative)
+                pop!(negative_branch_ids)
+            end
+            while length(positive_branch_ids) < length(positive)
+                push!(branch_x, Float64[])
+                push!(branch_y, Float64[])
+                push!(positive_branch_ids, length(branch_x))
+            end
+            while length(positive_branch_ids) > length(positive)
+                pop!(positive_branch_ids)
+            end
+
+            previous_nearest = nearest
         end
-        
-        # Plot line for this eigenvalue branch
+
+        for (branch_id, value) in zip(negative_branch_ids, negative)
+            push!(branch_x[branch_id], x_data[i])
+            push!(branch_y[branch_id], value)
+        end
+        for (branch_id, value) in zip(positive_branch_ids, positive)
+            push!(branch_x[branch_id], x_data[i])
+            push!(branch_y[branch_id], value)
+        end
+
+        if i == 1
+            spectrum = spectrum_data[i]
+            previous_nearest = spectrum isa AbstractVector && !isempty(spectrum) ? spectrum[argmin(abs.(spectrum))] : NaN
+        end
+        previous_negative_count = length(negative)
+    end
+
+    for (branch_id, (x_branch, y_branch)) in enumerate(zip(branch_x, branch_y))
         if !isempty(x_branch)
             plot!(plt, x_branch, y_branch,
-                  label=eval_idx == 1 ? "Eigenvalue Bands" : "",
+                  label=branch_id == 1 ? "Eigenvalue Bands" : "",
                   linewidth=2.0,
                   color=:black,
                   alpha=0.7)
@@ -287,17 +360,15 @@ function plt_log_gap(
     # Extract x-axis data
     x_data = sorted_rows[!, x_var]
     
-    # Extract spectrum data and invariant
-    spectrum_data = sorted_rows.specloc_spectrum
     gap_col = :specloc_gap
     gap_data = sorted_rows[!, gap_col]
-    log_gap_data = log.(abs.(gap_data) .+ 1e-15)
+    log_gap_data = log10.(abs.(gap_data) .+ 1e-15)
 
     # create plot of log gap vs x_var
     plt = plot(
         x_data, log_gap_data,
         xlabel=string(x_var),
-        ylabel="", #"log(|Gap|)",
+        ylabel="log10(minimum |eigenvalue|)",
         title="", #"Log Gap vs $(x_var)",
         linewidth=2.0,
         color=:blue,
@@ -305,7 +376,7 @@ function plt_log_gap(
         size=(1000,200),
         axis=false,
         xlims=(0.0,3.0),
-        ylims=(-8.0, 0.0)
+        ylims=(-4.0, 0.0)
     )
     savefig(plt, filename)
 
