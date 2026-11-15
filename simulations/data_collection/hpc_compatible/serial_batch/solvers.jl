@@ -41,7 +41,7 @@
 """
 
 module HPCSolv
-export hp_generic_solver, np_generic_solver, np_mu_rho_restricted_solver, np_seq_scaled_solver, UserOptions
+export hp_generic_solver, np_generic_solver, np_mu_rho_restricted_solver, np_seq_scaled_solver, np_optimised_specloc_solver, UserOptions
 
 using GenericLinearAlgebra
 using LinearAlgebra
@@ -49,8 +49,10 @@ using Base.Threads
 using DataFrames
 # using BSON: @save, @load
 using JLD2: @save, @load
-# using BSON: @save, @load
-using JLD2: @save, @load
+using SparseArrays
+using KrylovKit
+using Printf
+using Dates
 
 
 struct UserOptions
@@ -175,7 +177,6 @@ function build_operators_block_basis(
     
     return X, Gamma
 end
-
 
 ###########################################################
 ################### Sec 2: Calculations ###################
@@ -669,7 +670,7 @@ function finalize_projector_winding(acc::ProjectorWindingAccumulator)
     return round(Int, acc.phase_sum / (2π))
 end
 
-function np_calc_specloc_gap(
+function np_calc_specloc_gap_Krylov(
     L::Union{SparseMatrixCSC{Float64, Int}, Matrix};
     m_evals::Int=1,
     kk_tol::Real=1e-8,
@@ -685,6 +686,79 @@ function np_calc_specloc_gap(
     
     localiser_gap = sqrt(abs(evals[1]))
     return localiser_gap
+end
+
+function np_calc_specloc_winding_LDLT(
+    L::Union{SparseMatrixCSC{Float64, Int}, Matrix};
+    zero_tol::Float64=1e-10,
+    imag_tol::Float64=1e-10
+)::Float64
+
+    # The 1D Kitaev localiser should be real-symmetric. Enforce that numerically.
+    A = Matrix(L)
+    if eltype(A) <: Complex
+        max_imag = maximum(abs.(imag.(A)))
+        if max_imag > imag_tol
+            error("np_calc_specloc_winding_LDLT: localiser has non-negligible imaginary part (max |Im| = $(max_imag)).")
+        end
+        A = real.(A)
+    end
+
+    # Pivoted symmetric-indefinite LDL^T (Bunch-Kaufman): P' * A * P = L * D * L'.
+    # By Sylvester's law, inertia(A) == inertia(D).
+    F = bunchkaufman(Symmetric(A); check=false)
+    if !issuccess(F)
+        error("np_calc_specloc_winding_LDLT: Bunch-Kaufman factorization failed.")
+    end
+
+    D = F.D
+    n = size(D, 1)
+
+    n_pos = 0
+    n_neg = 0
+    i = 1
+
+    while i <= n
+        # In Bunch-Kaufman, D is block diagonal with 1x1 and 2x2 blocks.
+        if i < n && (abs(D[i, i + 1]) > zero_tol || abs(D[i + 1, i]) > zero_tol)
+            a = D[i, i]
+            b = D[i, i + 1]
+            c = D[i + 1, i]
+            d = D[i + 1, i + 1]
+
+            tr = a + d
+            disc = sqrt((a - d)^2 + 4 * b * c)
+            λ1 = 0.5 * (tr + disc)
+            λ2 = 0.5 * (tr - disc)
+
+            if λ1 > zero_tol
+                n_pos += 1
+            elseif λ1 < -zero_tol
+                n_neg += 1
+            end
+
+            if λ2 > zero_tol
+                n_pos += 1
+            elseif λ2 < -zero_tol
+                n_neg += 1
+            end
+
+            i += 2
+        else
+            v = D[i, i]
+            if v > zero_tol
+                n_pos += 1
+            elseif v < -zero_tol
+                n_neg += 1
+            end
+            i += 1
+        end
+    end
+
+    sig = n_pos - n_neg
+    winding = sig / 2.0
+
+    return winding
 end
 
 function np_calc_specloc_full(
@@ -713,6 +787,89 @@ function np_calc_specloc_full(
     localiser_gap = minimum(abs.(vals))
     
     return winding, localiser_gap, vals
+end
+
+function np_calc_specloc_signature_sparse_ldlt(
+    L::SparseMatrixCSC{Float64, Int};
+    max_shift_tries::Int=6,
+    base_shift::Float64=1e-12
+)::Int
+    M = Symmetric(L)
+    n = size(M, 1)
+    shift = 0.0
+
+    for _ in 0:max_shift_tries
+        try
+            F = ldlt(M; shift=shift)
+            LDmat = sparse(F.LD)
+            Dvals = diag(LDmat)
+            n_pos = count(x -> x > 0.0, Dvals)
+            n_neg = count(x -> x < 0.0, Dvals)
+            return n_pos - n_neg
+        catch err
+            estr = string(typeof(err))
+            if err isa LinearAlgebra.ZeroPivotException || occursin("CHOLMOD", estr) || occursin("Pivot", estr)
+                shift = shift == 0.0 ? base_shift : shift * 10.0
+                continue
+            else
+                rethrow(err)
+            end
+        end
+    end
+
+    vals = eigvals(Symmetric(Matrix(L)))
+    return count(vals .> 0.0) - count(vals .< 0.0)
+end
+
+function np_calc_specloc_low_lying_shift_invert(
+    L::SparseMatrixCSC{Float64, Int};
+    n_eigenpairs::Int=4,
+    kk_tol::Real=1e-8,
+    kk_maxiter::Int=300,
+    regularization::Float64=1e-10
+)::Vector{Float64}
+    n = size(L, 1)
+
+    try
+        F = lu(L)
+        L_inv_action(x) = F \ x
+        evals_inv, _, _ = eigsolve(
+            L_inv_action,
+            rand(Float64, n),
+            n_eigenpairs,
+            :LM;
+            ishermitian=true,
+            tol=kk_tol,
+            maxiter=kk_maxiter
+        )
+
+        low_vals = real.(1.0 ./ evals_inv)
+        sort!(low_vals, by=abs)
+        return low_vals[1:min(n_eigenpairs, length(low_vals))]
+    catch
+        L_reg = L + regularization * I(n)
+        try
+            F = lu(L_reg)
+            L_inv_action(x) = F \ x
+            evals_inv, _, _ = eigsolve(
+                L_inv_action,
+                rand(Float64, n),
+                n_eigenpairs,
+                :LM;
+                ishermitian=true,
+                tol=kk_tol,
+                maxiter=kk_maxiter
+            )
+
+            low_vals = real.(1.0 ./ evals_inv) .- regularization
+            sort!(low_vals, by=abs)
+            return low_vals[1:min(n_eigenpairs, length(low_vals))]
+        catch
+            vals = eigvals(Symmetric(Matrix(L)))
+            sort!(vals, by=abs)
+            return vals[1:min(n_eigenpairs, length(vals))]
+        end
+    end
 end
 
 
@@ -2246,7 +2403,7 @@ function hp_serial_solver_N_loop_threaded(
     return nothing
 end
 
-## user opts needs: kappas, x0s, gap_tol 
+## single value of x0 and kappa 
 function np_specloc_solver(
     N_range::Vector{Int},
     t_n_range::Vector{Vector{Float64}},
@@ -2258,7 +2415,10 @@ function np_specloc_solver(
     chunk_size::Int,
     filepath::String,
     opts::UserOptions,
-    row_index::Union{Int,Nothing}
+    row_index::Union{Int,Nothing},
+    x0s::Vector{Float64},
+    kappas::Vector{Float64}
+    # gap_tol::Float64
 )
     # allocate by maxthreadid (not nthreads) to cover all possible thread ids
     maxid = Threads.maxthreadid()
@@ -2269,22 +2429,15 @@ function np_specloc_solver(
         Delta = Float64[],
         sequence_name = String[],
         sequence_id = Tuple{Float64,Float64}[],
-        # mp = Float64[],
-        # maj_gap = Float64[],
-        # ipr = Float64[],
-        # loc_len = Float64[],
-        # eigenvalues = Union{Vector{Float64}, Missing}[],
-        # eigenvectors = Union{Matrix{Float64}, Missing}[]
         specloc_winding = Float64[],
         specloc_gap = Float64[],
-        specloc_spectrum = Union{Vector{Float64}, Missing}[]
+        # specloc_spectrum = Union{Vector{Float64}, Missing}[],
+        kappa = Float64[],
+        x0 = Float64[]
     ) for _ in 1:maxid]
     thread_local_chunks = ones(Int, maxid)
 
-    x0s = opts.x0s
-    kappas = opts.kappas
-
-    Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences)), length(x0s), length(kappas))
+    Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences), length(x0s), length(kappas)))
         tid = Threads.threadid()
         results_df = thread_local_results[tid]
         chunk_idx = thread_local_chunks[tid]
@@ -2305,30 +2458,22 @@ function np_specloc_solver(
         
         X, Gamma = build_operators_block_basis(N)
 
-        # for x0 in opts.xs, kappa in opts.kappas
-                    
+        specloc_windings = Float64[]
+        specloc_gaps = Float64[]
+            
         # X - x0 is diagonal, allowing fast vectorized math
         X_diff = sparse(Diagonal(X.diag .- x0))
         
         # Assemble the 1D Spectral localiser
         L = kappa .* (Gamma * X_diff) + H_BdG
 
+        ## Slow but correct 
         winding_val, gap, spectrum = np_calc_specloc_full(L)
 
-        # # If the localiser gap closes, treat invariant as ill-defined (missing)
-        # winding_number = if gap <= opts.spec_loc_gap_tol
-        #     missing
-        # else
-        #     winding_val
-        # end
-        # end
+        # ## Fast untested
+        # gap = np_calc_specloc_gap_Krylov(L, m_evals=1)
+        # winding_val = np_calc_specloc_winding_LDLT(L)
 
-        # evals, evecs = LinearAlgebra.eigen(Hermitian(BdG))
-
-        # mp = opts.calc_mp ? np_calc_maj_mp(evecs) : NaN
-        # gap = opts.calc_mbs_energy_gap ? np_mbs_gap_size(evals) : NaN
-        # ipr = opts.calc_ipr ? np_calc_maj_ipr(evecs) : NaN
-        # loc_len = opts.calc_loc_len ? np_calc_maj_loc_len(evecs) : NaN
 
         push!(results_df, (
             N = N,
@@ -2337,19 +2482,15 @@ function np_specloc_solver(
             Delta = Delta,
             sequence_name = sequence_name,
             sequence_id = sequence_id,
-            # mp = mp,
-            # maj_gap = gap,
-            # ipr = ipr,
-            # loc_len = loc_len,
-            # eigenvalues = eigenvalues_to_save,
-            # eigenvectors = eigenvectors_to_save
             specloc_winding = winding_val,
             specloc_gap = gap,
-            specloc_spectrum = spectrum
+            # specloc_spectrum = spectrum
+            kappa = kappa,
+            x0 = x0,
         ))
 
         if nrow(results_df) >= chunk_size
-            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
             empty!(results_df)
             thread_local_chunks[tid] = chunk_idx + 1
@@ -2361,10 +2502,177 @@ function np_specloc_solver(
         results_df = thread_local_results[tid]
         if nrow(results_df) > 0
             chunk_idx = thread_local_chunks[tid]
-            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).bson"
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
             @save file_name results_df
         end
     end
+
+    return nothing
+end
+
+# =====================================================================
+# Progress tracking helpers
+# =====================================================================
+
+function format_dur(s::Real)::String
+    t = max(0, round(Int, s))
+    h = t ÷ 3600
+    m = (t % 3600) ÷ 60
+    s_rem = t % 60
+    return @sprintf("%02d:%02d:%02d", h, m, s_rem)
+end
+
+function stdout_tty()::Bool
+    try
+        return Base.isatty(stdout)
+    catch
+        return false
+    end
+end
+
+## single value(s) of x0 and kappa, optimized sparse eigensolver + sparse LDLt signature
+function np_optimised_specloc_solver(
+    N_range::Vector{Int},
+    t_n_range::Vector{Vector{Float64}},
+    mu_range::Vector{Float64},
+    Delta_range::Vector{Float64},
+    sequences::Vector{Vector{Int}},
+    sequence_name::String,
+    sequence_ids::Vector{Tuple{Float64,Float64}},
+    chunk_size::Int,
+    filepath::String,
+    opts::UserOptions,
+    row_index::Union{Int,Nothing},
+    x0s::Vector{Float64},
+    kappas::Vector{Float64};
+    n_lowest_evals::Int=4,
+    kk_tol::Real=1e-8,
+    kk_maxiter::Int=300
+)
+    # ===== Progress tracking setup =====
+    total = length(N_range) * length(t_n_range) * length(mu_range) * length(Delta_range) * 
+            length(sequences) * length(x0s) * length(kappas)
+    ci_counter = Threads.Atomic{Int}(0)  # Thread-safe atomic counter
+    t0 = time()
+    tlast = t0
+    tcum = 0.0
+    tcum_lock = Threads.ReentrantLock()  # Lock for cumulative time updates
+    
+    maxid = Threads.maxthreadid()
+    thread_local_results = [DataFrame(
+        N = Int[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        Delta = Float64[],
+        sequence_name = String[],
+        sequence_id = Tuple{Float64,Float64}[],
+        specloc_invariant = Float64[],
+        specloc_gap = Float64[],
+        specloc_low_lying_spectrum = Vector{Float64}[],
+        kappa = Float64[],
+        x0 = Float64[]
+    ) for _ in 1:maxid]
+    thread_local_chunks = ones(Int, maxid)
+
+    Threads.@threads :static for idx in CartesianIndices((length(N_range), length(t_n_range), length(mu_range), length(Delta_range), length(sequences), length(x0s), length(kappas)))
+        tid = Threads.threadid()
+        results_df = thread_local_results[tid]
+        chunk_idx = thread_local_chunks[tid]
+
+        N = N_range[idx[1]]
+        t_n = t_n_range[idx[2]]
+        mu = mu_range[idx[3]]
+        Delta = Delta_range[idx[4]]
+        sequence = sequences[idx[5]]
+        sequence_id = sequence_ids[idx[5]]
+        x0 = x0s[idx[6]]
+        kappa = kappas[idx[7]]
+
+        truncated_sequence = Vector(sequence[1:N])
+        H_BdG = np_create_bdg_hamiltonian(N, t_n, mu, Delta, truncated_sequence)
+
+        X, Gamma = build_operators_block_basis(N)
+        X_diff = sparse(Diagonal(X.diag .- x0))
+
+        # 1D localizer is real-symmetric in this model; keep sparse structure for fast solvers.
+        L = sparse(real.(H_BdG)) + kappa .* (Gamma * X_diff)
+
+        low_lying = np_calc_specloc_low_lying_shift_invert(
+            L;
+            n_eigenpairs=n_lowest_evals,
+            kk_tol=kk_tol,
+            kk_maxiter=kk_maxiter
+        )
+        specloc_gap = minimum(abs.(low_lying))
+
+        sig = np_calc_specloc_signature_sparse_ldlt(L)
+        specloc_invariant = sig / 2.0
+
+        push!(results_df, (
+            N = N,
+            t_n = t_n,
+            mu = mu,
+            Delta = Delta,
+            sequence_name = sequence_name,
+            sequence_id = sequence_id,
+            specloc_invariant = specloc_invariant,
+            specloc_gap = specloc_gap,
+            specloc_low_lying_spectrum = low_lying,
+            kappa = kappa,
+            x0 = x0,
+        ))
+
+        # ===== Progress tracking update =====
+        Threads.atomic_add!(ci_counter, 1)
+        ci = ci_counter[]  # Read atomic value
+        
+        # Print progress (from any thread, but only if not too frequent)
+        if ci % max(1, div(total, 100)) == 0 || ci == total  # Print every ~1% or at end
+            t_now = time()
+            lock(tcum_lock) do
+                dt = t_now - tlast
+                tcum += dt
+                tlast = t_now  # Reset timer for next interval
+            end
+            
+            t_elapsed = t_now - t0
+            avg_time = tcum / ci
+            eta_secs = (total - ci) * avg_time
+            timestamp = Dates.format(Dates.now(), "at HH:MM:SS (UTC)")
+            line = @sprintf("[Row %s] %d/%d | elapsed=%s | avg=%.2fs | ETA=%s | %s",
+                            row_index !== nothing ? string(row_index) : "?",
+                            ci, total, format_dur(t_elapsed), avg_time, format_dur(eta_secs), timestamp)
+            stdout_tty() ? print("\r" * line * "    ") : println(line)
+            flush(stdout)
+        end
+
+        if nrow(results_df) >= chunk_size
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
+            @save file_name results_df
+            empty!(results_df)
+            thread_local_chunks[tid] = chunk_idx + 1
+        end
+    end
+
+    # Final newline if TTY
+    if stdout_tty()
+        println()
+    end
+
+    for tid in 1:maxid
+        results_df = thread_local_results[tid]
+        if nrow(results_df) > 0
+            chunk_idx = thread_local_chunks[tid]
+            file_name = "$(filepath)_row$(row_index)_thread_$(tid)_chunk_$(chunk_idx).jld2"
+            @save file_name results_df
+        end
+    end
+
+    t_total = time() - t0
+    timestamp = Dates.format(Dates.now(), "at HH:MM:SS (UTC)")
+    println(@sprintf("[Row %s] Complete: %d/%d in %s | avg=%.2fs | %s",
+                     row_index !== nothing ? string(row_index) : "?",
+                     total, total, format_dur(t_total), t_total / max(total, 1), timestamp))
 
     return nothing
 end

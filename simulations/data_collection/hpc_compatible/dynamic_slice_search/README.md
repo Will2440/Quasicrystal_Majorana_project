@@ -6,13 +6,20 @@ The original adaptive-cell implementations remain unchanged in `../dynamic_searc
 
 ## Search behavior
 
+Each rho slice uses two sampling scales. A sparse full-range discovery grid remains active on every slice. `mu_baseline_points` is its count at `rho_start`; physical-span scaling preserves its starting physical-mu spacing, and `discovery_rho_growth_factor` adds a modest extra density toward `rho_max`. Predicted transition bands receive more samples, increasing from `mu_refine_points_per_prediction` to its configured maximum. Their padding is driven by observed edge motion and curvature, with configured minimum and maximum fractions of the mu span. Newly detected transitions become tracks and receive the same focused sampling on subsequent slices. Low-localizer-gap intervals still receive bounded midpoint refinement, and every observed phase-change bracket is bisected to `transition_mu_tol`.
+
+Transition motion is only extrapolated after at least three observed slice positions. The extrapolation is damped and capped by `momentum_max_shift_fraction`; every slice still receives its full baseline scan. Predictions therefore focus additional work but never remove the discovery scan.
+
+Transition IDs are assigned by an order-preserving sequence alignment in mu, using predicted positions and phase-transition orientation. The matcher can leave old edges unmatched or start new tracks, and its allowed match distance is based on a small baseline tolerance plus predicted movement, capped by `track_match_max_tolerance_fraction`. This prevents a newly appearing interior edge from taking the ID of an established outer edge. Midpoint probes for onset bracketing are evaluated out of sweep order and are deliberately saved with track ID zero rather than used to update motion histories.
+
+After the configured rho grid, additional midpoint slices are evaluated around detected gap-count changes until their brackets are narrower than `rho_onset_tol` or the extra-slice budget is exhausted.
 Each slice receives a full coarse baseline scan over the configured normalized chemical-potential interval. Predicted transition bands add local samples, low-localizer-gap intervals receive bounded midpoint refinement, and every observed phase-change bracket is bisected to `transition_mu_tol`.
 
 Transition motion is only extrapolated after at least three observed slice positions. The extrapolation is damped and capped by `momentum_max_shift_fraction`; every slice still receives its full baseline scan. Predictions therefore focus additional work but never remove the discovery scan.
 
 After the configured sweep grid, additional midpoint slices are evaluated around detected gap-count changes until their brackets meet the corresponding onset tolerance or the extra-slice budget is exhausted. Tracking and onset refinement use the selected sweep parameter.
 
-The baseline scan cannot guarantee detection of a phase interval narrower than its spacing. Treat `mu_baseline_points` as a declared discovery resolution and test convergence by increasing it. The localizer-gap refinement is a supplemental signal, not a proof that unsampled intervals contain no transition.
+The sparse discovery scan cannot guarantee detection of a phase interval narrower than its spacing. Treat the per-slice `baseline_mu_spacing` in `slice_summary.csv` as the discovery-resolution record and test convergence by increasing `mu_baseline_points` or `discovery_rho_growth_factor`. The localizer-gap refinement is a supplemental signal, not proof that unsampled intervals contain no transition.
 
 ## Configuration
 
@@ -29,8 +36,11 @@ Edit `config/default_slice_config.jl` for the default run or pass another config
 - `transition_mu_tol`: stopping width for each observed transition bracket in physical mu.
 - `gap_refine_tol`, `gap_refine_mu_tol`, `gap_refine_max_depth`: bounded refinement for adjacent samples with small localizer gaps.
 - `momentum_min_history`, `momentum_damping`, `momentum_max_shift_fraction`: conservative prediction controls.
-- `prediction_band_half_width_fraction`, `mu_refine_points_per_prediction`: extra sample bands around tracked edges.
-- `track_match_max_fraction`, `track_max_missed_slices`: edge matching and temporary disappearance behavior.
+- `prediction_band_min_fraction`, `prediction_band_max_fraction`, `prediction_band_motion_multiplier`, `prediction_band_curvature_multiplier`: data-informed padding around each predicted edge, bounded by the configured mu-span fractions. The default 3% minimum preserves the prior low-rho band width.
+- `mu_refine_points_per_prediction`, `mu_refine_points_per_prediction_max`, `boundary_resolution_growth_power`: local boundary-band sample density from the start to the high-rho end.
+- `track_match_base_tolerance_fraction`, `track_match_step_scale`, `track_match_max_tolerance_fraction`: prediction-centered association tolerance, scaled by the predicted edge movement and capped relative to the physical mu span.
+- `track_unmatched_penalty`: sequence-alignment cost for leaving an old edge unmatched or treating a detected transition as new.
+- `track_max_missed_slices`: how many sequential slices an unmatched track remains eligible for matching.
 - `rho_onset_tol`, `rho_onset_max_extra_slices`: gap-count change bracket width and total midpoint-probe budget.
 - `Delta_onset_tol`, `Delta_onset_max_extra_slices`: corresponding controls for a Delta sweep, in Delta units.
 - `max_points_per_slice`, `max_total_points`: point budgets; execution stops cleanly at a budget and saves completed work.

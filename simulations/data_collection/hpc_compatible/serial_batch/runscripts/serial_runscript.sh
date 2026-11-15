@@ -1,15 +1,14 @@
 #!/bin/bash
 
-#SBATCH --job-name=LMP-HP-610
+#SBATCH --job-name=MP_QC-SC_rerun
 #SBATCH --nodes=1
 #SBATCH --partition=compute
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --account=phys030424
-#SBATCH --array=1-101
-#SBATCH --time=20:00:00
-#SBATCH --mem=10G
-#SBATCH --output=/dev/null
+#SBATCH --array=1-121
+#SBATCH --time=03:00:00
+#SBATCH --mem=5G
 
 module add languages/julia
 export JULIA_DEPOT_PATH="/user/work/hb21877/.julia"

@@ -11,3 +11,7 @@ raw_data/
 results/
 *.csv
 *.dat
+*.out
+*.log
+*.err
+*.pdf

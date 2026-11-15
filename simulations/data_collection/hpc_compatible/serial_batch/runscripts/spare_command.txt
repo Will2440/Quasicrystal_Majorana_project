@@ -44,6 +44,7 @@ array_runtime_stats() {
           count++
           if (min == "" || $1 < min) min = $1
           if ($1 > max) max = $1
+          vals[count] = $1
         }
 
         END {
@@ -52,10 +53,18 @@ array_runtime_stats() {
             exit 1
           }
 
+          asort(vals)
+          if (count % 2 == 1) {
+            median = vals[int(count / 2) + 1]
+          } else {
+            median = (vals[count / 2] + vals[count / 2 + 1]) / 2
+          }
+
           printf "Jobs: %d\n", count
           printf "Min runtime: %s\n", fmt(min)
           printf "Max runtime: %s\n", fmt(max)
-          printf "Avg runtime: %s\n", fmt(int(sum / count))
+          printf "Avg (mean) runtime: %s\n", fmt(int(sum / count))
+          printf "Avg (median) runtime: %s\n", fmt(int(median))
         }'
 }
 

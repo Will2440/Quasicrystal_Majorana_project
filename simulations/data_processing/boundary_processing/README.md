@@ -11,6 +11,8 @@ These scripts extract and visualize the topological phase boundary from the adap
 
 ## Scripts
 
+Slice-based search outputs have their own readers and plots in [`slice_boundary_processing/README.md`](slice_boundary_processing/README.md).
+
 ### 1. `plot_phase_boundary.jl` — Single Phase Diagram
 
 Creates a complete phase diagram plot from all accumulated data in a run.

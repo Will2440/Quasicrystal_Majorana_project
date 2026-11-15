@@ -30,7 +30,9 @@ function run_selected_solver(
     rho_target::Float64=1.5,
     tbar::Float64=1.5,
     preserve_symbol::Symbol=:t1,
-    row_index::Union{Int,Nothing}=nothing
+    row_index::Union{Int,Nothing}=nothing,
+    x0s=nothing,
+	kappas=nothing
 )
 
     # helper: pick the first element for mu_loop and warn if multiple
@@ -109,6 +111,16 @@ function run_selected_solver(
             error("Unsupported precision for :seq_scaled: $(opts.calc_precision)")
         end
         HPCSolv.np_seq_scaled_solver(N_range, rho_target, tbar, mu_range, Delta_range, sequences, sequence_name, sequence_ids, chunk_size, filepath, opts; preserve=preserve_symbol, row_index=row_index)
+    
+        elseif opts.solver_type == :spec_loc
+		HPCSolv.np_specloc_solver(N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, sequence_ids, chunk_size, filepath, opts, row_index, x0s, kappas)
+
+        elseif opts.solver_type == :spec_loc_optimised
+            if opts.calc_precision != :np
+                println(":spec_loc_optimised solver is only implemented for :np (got $(opts.calc_precision))")
+                error("Unsupported precision for :spec_loc_optimised: $(opts.calc_precision)")
+            end
+    		HPCSolv.np_optimised_specloc_solver(N_range, t_n_range, mu_range, Delta_range, sequences, sequence_name, sequence_ids, chunk_size, filepath, opts, row_index, x0s, kappas)
 
     else
         error("Unknown solver type: $(opts.solver_type)")
