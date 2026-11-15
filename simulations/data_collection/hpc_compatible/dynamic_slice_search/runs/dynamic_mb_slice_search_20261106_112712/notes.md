@@ -1,0 +1,1 @@
+used kappa=1e-6. much slower (3x slower at least) didn;t quite compelte all basic scans, timedout at 51/55.

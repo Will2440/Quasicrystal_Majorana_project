@@ -9,7 +9,7 @@ mutable struct EdgeTrack
     last_seen::Int
 end
 
-function predict_edges(tracks::Vector{EdgeTrack}, next_rho::Real, current_slice::Int, mu_bounds, cfg::Dict{Symbol,Any})
+function predict_edges(tracks::Vector{EdgeTrack}, next_value::Real, current_slice::Int, mu_bounds, cfg::Dict{Symbol,Any})
     predictions = NamedTuple[]
     min_history = Int(get(cfg, :momentum_min_history, 3))
     momentum_enabled = Bool(get(cfg, :momentum_enabled, true))
@@ -26,10 +26,10 @@ function predict_edges(tracks::Vector{EdgeTrack}, next_rho::Real, current_slice:
 
         if momentum_enabled && length(track.history) >= min_history
             prior = track.history[end - 2]
-            delta_rho = Float64(last.rho) - Float64(prior.rho)
-            if delta_rho > 0
-                slope = (Float64(last.mu) - Float64(prior.mu)) / delta_rho
-                raw_shift = damping * slope * (Float64(next_rho) - Float64(last.rho))
+            delta_value = Float64(last.sweep_value) - Float64(prior.sweep_value)
+            if delta_value > 0
+                slope = (Float64(last.mu) - Float64(prior.mu)) / delta_value
+                raw_shift = damping * slope * (Float64(next_value) - Float64(last.sweep_value))
                 shift_cap = max_shift_fraction * mu_span
                 predicted_mu += clamp(raw_shift, -shift_cap, shift_cap)
             end
@@ -41,7 +41,7 @@ function predict_edges(tracks::Vector{EdgeTrack}, next_rho::Real, current_slice:
     return predictions
 end
 
-function update_tracks!(tracks::Vector{EdgeTrack}, transitions, rho::Real, slice_index::Int, mu_bounds, cfg::Dict{Symbol,Any})
+function update_tracks!(tracks::Vector{EdgeTrack}, transitions, value::Real, slice_index::Int, mu_bounds, cfg::Dict{Symbol,Any})
     mu_span = Float64(mu_bounds[2] - mu_bounds[1])
     max_match = Float64(get(cfg, :track_match_max_fraction, 0.15)) * mu_span
     unmatched_tracks = Set(eachindex(tracks))
@@ -63,7 +63,7 @@ function update_tracks!(tracks::Vector{EdgeTrack}, transitions, rho::Real, slice
             end
         end
 
-        point = (rho=Float64(rho), mu=Float64(transition.mu))
+        point = (sweep_value=Float64(value), mu=Float64(transition.mu))
         if best_idx === nothing
             push!(tracks, EdgeTrack(next_id, orientation, [point], slice_index))
             push!(transition_ids, next_id)

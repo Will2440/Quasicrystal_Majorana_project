@@ -12,8 +12,10 @@ function build_rho_grid(rho_start::Real, rho_max::Real, n_slices::Integer, spaci
     n_slices >= 1 || error("n_rho_slices must be at least one")
 
     if spacing == :linear
+        n_slices == 1 && return [Float64(rho_start)]
         return collect(range(Float64(rho_start), Float64(rho_max); length=n_slices))
     elseif spacing == :log
+        n_slices == 1 && return [Float64(rho_start)]
         return exp.(range(log(Float64(rho_start)), log(Float64(rho_max)); length=n_slices))
     end
     error("Unknown rho spacing mode: $spacing (expected :linear or :log)")

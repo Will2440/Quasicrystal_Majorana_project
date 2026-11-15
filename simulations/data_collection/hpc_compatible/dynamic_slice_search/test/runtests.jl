@@ -3,15 +3,48 @@ using Statistics
 
 include(joinpath(@__DIR__, "..", "core", "slice_search.jl"))
 include(joinpath(@__DIR__, "..", "core", "tracking.jl"))
+include(joinpath(@__DIR__, "..", "core", "bandwidth.jl"))
+include(joinpath(@__DIR__, "..", "core", "sweep.jl"))
 
 using .SliceSearch
 using .TransitionTracking
 
 sample(mu, phase; gap=0.1) = (mu=Float64(mu), phase_label=Int(phase), gap_min=Float64(gap))
 
+@testset "Sweep parameters" begin
+    cfg = Dict{Symbol,Any}(
+        :sweep_mode => :vary_t2, :t1_fixed => 1.0, :t2_fixed => 1.5,
+        :Delta => 0.05, :rho_start => 1.0, :rho_max => 2.0,
+        :n_rho_slices => 3, :rho_spacing_mode => :linear,
+        :Delta_start => 0.0, :Delta_max => 0.2, :n_Delta_slices => 3,
+        :Delta_spacing_mode => :linear)
+    @test SliceSweep.sweep_grid(cfg) ≈ [1.0, 1.5, 2.0]
+    rho_params = SliceSweep.physical_parameters(2.0, cfg, 0.5)
+    @test (rho_params.rho, rho_params.Delta, rho_params.t1, rho_params.t2) == (2.0, 0.05, 1.0, 2.0)
+    cfg[:sweep_parameter] = :Delta
+    @test SliceSweep.sweep_grid(cfg) ≈ [0.0, 0.1, 0.2]
+    cfg[:n_Delta_slices] = 1
+    @test SliceSweep.sweep_grid(cfg) == [0.0]
+    cfg[:n_Delta_slices] = 3
+    critical = SliceSweep.fixed_mu_critical(cfg, 0.5)
+    first = SliceSweep.physical_parameters(0.0, cfg, 0.5, critical)
+    last = SliceSweep.physical_parameters(0.2, cfg, 0.5, critical)
+    @test (first.rho, first.t1, first.t2, first.Delta) == (1.5, 1.0, 1.5, 0.0)
+    @test last.Delta == 0.2
+    @test first.mu_critical == last.mu_critical == 2.5
+    cfg[:Delta_spacing_mode] = :log
+    @test_throws ErrorException SliceSweep.sweep_grid(cfg)
+    cfg[:Delta_start] = 0.01
+    @test SliceSweep.sweep_grid(cfg) ≈ [0.01, sqrt(0.002), 0.2]
+    cfg[:t1_fixed] = 0.0
+    @test_throws ErrorException SliceSweep.fixed_mu_critical(cfg, 0.5)
+end
+
 @testset "Slice search" begin
     linear = SliceSearch.build_rho_grid(1.0, 3.0, 5, :linear)
     @test linear ≈ [1.0, 1.5, 2.0, 2.5, 3.0]
+    @test SliceSearch.build_rho_grid(1.0, 3.0, 1, :linear) == [1.0]
+    @test SliceSearch.build_rho_grid(1.0, 3.0, 1, :log) == [1.0]
     logarithmic = SliceSearch.build_rho_grid(1.0, 9.0, 3, :log)
     @test logarithmic ≈ [1.0, 3.0, 9.0]
     @test_throws ErrorException SliceSearch.build_rho_grid(0.0, 3.0, 5, :log)
