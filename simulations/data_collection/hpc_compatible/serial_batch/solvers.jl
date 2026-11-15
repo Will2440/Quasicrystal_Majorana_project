@@ -744,10 +744,6 @@ function hp_generic_solver(
         - This ProgressMeter @showprogress may not give accurate representation of time remaining if disordered parameter looping results in variation in loop time over runtime.
         - The chunk_size must be sufficiently small to not exceed the memory allocated to this task (again paying attention to indiscriminate loop orders).
     """
-
-    # allocate by maxthreadid (not nthreads) to cover all possible thread ids
-    maxid = Threads.maxthreadid()
-    thread_local_results = [DataFrame(
     # Allocate by maxthreadid (not nthreads) to cover all possible thread ids
     maxid = Threads.maxthreadid()
     thread_local_results = [DataFrame(

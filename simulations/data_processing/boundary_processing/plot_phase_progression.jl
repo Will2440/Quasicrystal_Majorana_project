@@ -22,7 +22,7 @@ const T1_FIXED = 1.0
 const T2_FIXED = 1.0
 const SWEEP_MODE = :vary_t2
 
-function parse_point_key(key::String)
+function parse_point_key(key::AbstractString)
     parts = split(key, "|")
     return parse(Float64, parts[1]), parse(Float64, parts[2])
 end
@@ -43,26 +43,58 @@ function calculate_mu_critical(rho::Float64, gamma::Float64)
 end
 
 function load_iteration_data(run_dir::String, iter::Int)
-    """Load data accumulated up to and including specified iteration."""
+    """Load evaluated points from iteration directory."""
     
-    results_file = joinpath(run_dir, "point_results_compact.csv")
+    iter_dir = joinpath(run_dir, "iter_$(lpad(iter, 3, '0'))")
+    
+    # Look for worker results in the iteration's results directory
+    results_file = joinpath(iter_dir, "results", "worker_results_local.csv")
+    
+    if !isfile(results_file)
+        # Fallback: try to use cells_resolved if available
+        results_file = joinpath(iter_dir, "cells_resolved.csv")
+    end
+    
+    if !isfile(results_file)
+        # Last resort: use main results file
+        results_file = joinpath(run_dir, "point_results_compact.csv")
+    end
+    
     if !isfile(results_file)
         return nothing
     end
     
     df = CSV.read(results_file, DataFrame)
+    col_names = names(df)
     
     rhos = Float64[]
     mus = Float64[]
     phases = Int[]
     
-    for row in eachrow(df)
-        rho, u = parse_point_key(row.point_key)
-        mu_c = calculate_mu_critical(rho, GAMMA)
-        mu = u * mu_c
-        push!(rhos, rho)
-        push!(mus, mu)
-        push!(phases, row.phase_label)
+    # Check if we have point_key column (from worker results or point_results_compact)
+    if "point_key" in col_names || :point_key in col_names
+        for row in eachrow(df)
+            rho, u = parse_point_key(row.point_key)
+            mu_c = calculate_mu_critical(rho, GAMMA)
+            mu = u * mu_c
+            push!(rhos, rho)
+            push!(mus, mu)
+            push!(phases, row.phase_label)
+        end
+    # Otherwise, check if we have rho/u columns and phase_label (from cells_resolved)
+    elseif "rho_lo" in col_names && "u_lo" in col_names
+        for row in eachrow(df)
+            # Use midpoints of cell ranges
+            rho = (row.rho_lo + row.rho_hi) / 2.0
+            u = (row.u_lo + row.u_hi) / 2.0
+            mu_c = calculate_mu_critical(rho, GAMMA)
+            mu = u * mu_c
+            push!(rhos, rho)
+            push!(mus, mu)
+            push!(phases, row.phase_label)
+        end
+    else
+        error("Unrecognized CSV format in $results_file. Columns: $(col_names)")
     end
     
     return (rhos=rhos, mus=mus, phases=phases)
@@ -167,7 +199,7 @@ function main()
                 println("  → Saving to $out_file")
                 savefig(p, out_file)
             else
-                display(p)
+                println("  (Skipped display - use --save to save plots to disk)")
             end
         end
     end

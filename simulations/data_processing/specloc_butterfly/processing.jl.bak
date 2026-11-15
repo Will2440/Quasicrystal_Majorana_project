@@ -1,0 +1,374 @@
+"""
+    file name:   processing.jl
+    created:     2026-09-22
+
+    overview:
+        Simplified processing module for spectral localizer butterfly data.
+        Extracts spectral localizer invariant values from raw JLD2 chunk files
+        and organizes them into DataFrames for plotting.
+
+    structure:
+        - load_chunk_files: Load all chunk files for a given data folder
+        - extract_specloc_data: Extract specloc values and organize by mu and phi/slope
+        - aggregate_data: Combine all data into a single organized structure
+"""
+
+module SpecLocProcessing
+
+using JLD2
+using DataFrames
+using ProgressMeter
+using Statistics
+
+export load_chunk_files, extract_specloc_data, aggregate_specloc_data, downsample_data, mirror_mu_data, compute_mu_bounds_specloc, apply_mu_normalisation!
+
+
+"""
+    load_chunk_files(folder_path::String)
+
+Load all JLD2 chunk files from a folder. Returns a vector of DataFrames.
+"""
+function load_chunk_files(folder_path::String)
+    # Get all .jld2 files
+    files = filter(f -> endswith(f, ".jld2"), readdir(folder_path))
+    sort!(files)  # Sort to ensure consistent ordering
+    
+    dataframes::Vector{DataFrame} = DataFrame[]
+    
+    @showprogress "Loading chunks..." for filename in files
+        filepath = joinpath(folder_path, filename)
+        try
+            data = JLD2.load(filepath)
+            # The JLD2 file should contain a DataFrame or dictionary with a DataFrame
+            if haskey(data, "result")
+                df = data["result"]
+            elseif length(data) == 1
+                # If there's only one key, use that
+                df = first(values(data))
+            else
+                df = data
+            end
+            
+            # Make sure it's a DataFrame
+            if isa(df, DataFrame)
+                push!(dataframes, df)
+            end
+        catch e
+            @warn "Failed to load $filename: $e"
+        end
+    end
+    
+    return dataframes
+end
+
+
+"""
+    extract_specloc_data(dataframes::Vector{DataFrame})
+
+Extract spectral localizer invariant values from DataFrames.
+Returns organized data structure with columns: N, t_n, mu, phi, specloc_gap, specloc_winding
+"""
+function extract_specloc_data(dataframes::Vector{DataFrame})
+    # Combine all DataFrames
+    combined_df = vcat(dataframes...)
+    
+    # Extract relevant columns - look for specloc-related columns
+    # Common names: specloc_gap, specloc_winding, winding, localiser_gap
+    
+    extracted_data = DataFrame(
+        N = Int64[],
+        t_n = Vector{Float64}[],
+        mu = Float64[],
+        phi = Float64[],  # slope from sequence_id[1]
+        phason = Float64[],  # phason from sequence_id[2]
+        x0 = Float64[],
+        Delta = Float64[],
+        specloc_invariant = Float64[],
+        specloc_gap = Float64[]
+    )
+
+    # Diagnose x0 column
+    x0_col = if "x0" in names(combined_df)
+        :x0
+    elseif "x_0" in names(combined_df)
+        :x_0
+    else
+        nothing
+    end
+    
+    if isnothing(x0_col)
+        @warn "x0 column not found in combined DataFrame. Available columns: $(names(combined_df))"
+    else
+        sample_x0 = combined_df[1:min(10, nrow(combined_df)), x0_col]
+        @info "x0 column detected: $x0_col. Sample values: $sample_x0"
+    end
+    
+    for row in eachrow(combined_df)
+        # Extract basic parameters
+        N = get(row, :N, missing)
+        t_n = get(row, :t_n, missing)
+        mu = get(row, :mu, missing)
+        Delta = get(row, :Delta, missing)
+        sequence_id = get(row, :sequence_id, missing)
+        x0 = missing
+        if !isnothing(x0_col)
+            x0 = get(row, x0_col, missing)
+        end
+        
+        # Extract phi (slope) and phason from sequence_id tuple
+        phi = missing
+        phason = missing
+        if !ismissing(sequence_id) && isa(sequence_id, Tuple) && length(sequence_id) >= 2
+            phi = convert(Float64, sequence_id[1])
+            phason = convert(Float64, sequence_id[2])
+        end
+        
+        # Extract specloc values
+        specloc_invariant = missing
+        specloc_gap = missing
+        
+        # Try to get specloc_invariant first (main quantity)
+        if hasproperty(row, :specloc_invariant)
+            specloc_invariant = convert(Float64, get(row, :specloc_invariant, missing))
+        end
+        
+        # Also get specloc_gap if available
+        if hasproperty(row, :specloc_gap)
+            specloc_gap = convert(Float64, get(row, :specloc_gap, missing))
+        end
+        
+        # Only add if we have the essential data
+        if !ismissing(phi) && !ismissing(phason) && !ismissing(specloc_invariant)
+            push!(extracted_data, (
+                N = ismissing(N) ? 500 : N,
+                t_n = ismissing(t_n) ? [1.0, 2.0] : t_n,
+                mu = ismissing(mu) ? 0.0 : mu,
+                phi = phi,
+                phason = phason,
+                x0 = ismissing(x0) ? NaN : convert(Float64, x0),
+                Delta = ismissing(Delta) ? 0.05 : Delta,
+                specloc_invariant = specloc_invariant,
+                specloc_gap = ismissing(specloc_gap) ? specloc_invariant : specloc_gap
+            ))
+        end
+    end
+    
+    # Diagnostic: check extracted x0 values
+    n_valid_x0 = count(!isnan, extracted_data.x0)
+    @info "Extraction complete: $(nrow(extracted_data)) rows extracted, $n_valid_x0 rows with valid x0 (non-NaN)"
+    if n_valid_x0 > 0
+        @info "x0 range in extracted data: $(minimum(extracted_data.x0[.!isnan.(extracted_data.x0)])) to $(maximum(extracted_data.x0[.!isnan.(extracted_data.x0)]))"
+    end
+    
+    return extracted_data
+end
+
+
+"""
+    aggregate_specloc_data(df::DataFrame; by_mean::Bool=true, average_over_x0::Bool=false)
+
+Aggregate specloc data by (mu, phi, Delta, x0) groups for efficient plotting.
+Takes statistics (mean) if multiple entries per grid point, reducing data points significantly.
+
+Returns aggregated DataFrame with columns: mu, phi, phason, specloc_invariant, specloc_gap, N, Delta
+"""
+function aggregate_specloc_data(df::DataFrame; by_mean::Bool=true, average_over_x0::Bool=false)
+    if by_mean
+        # Group either per-x0 or averaged-over-x0.
+        # Per-x0 keeps one 1201x1000 map per x0 value.
+        grouping_cols = average_over_x0 ? [:mu, :phi, :Delta] : [:mu, :phi, :Delta, :x0]
+        grouped = combine(
+            groupby(df, grouping_cols),
+            :specloc_invariant => mean => :specloc_invariant,
+            :specloc_gap => mean => :specloc_gap,
+            :phason => first => :phason,  # phason should be constant for a group
+            :N => first => :N,  # N should be constant for a group
+            :x0 => first => :x0  # Explicitly preserve x0
+        )
+        if average_over_x0
+            grouped.x0 = fill(NaN, nrow(grouped))
+        end
+        return grouped
+    else
+        # No aggregation, return as-is
+        return df
+    end
+end
+
+
+"""
+    downsample_data(df::DataFrame, factor::Int=10)
+
+Downsample data by taking every Nth unique (mu, phi) point.
+Useful for quick visualization and testing.
+
+Returns downsampled DataFrame.
+"""
+function downsample_data(df::AbstractDataFrame, factor::Int=10)
+    unique_mus = sort(unique(df.mu))
+    unique_phis = sort(unique(df.phi))
+    
+    # Subsample by taking every factor-th point
+    downsampled_mus = unique_mus[1:factor:end]
+    downsampled_phis = unique_phis[1:factor:end]
+    downsampled_mu_set = Set(downsampled_mus)
+    downsampled_phi_set = Set(downsampled_phis)
+    
+    # Filter to keep only downsampled points
+    mask = [row.mu in downsampled_mu_set && row.phi in downsampled_phi_set for row in eachrow(df)]
+    downsampled_df = df[mask, :]
+    
+    n_original = nrow(df)
+    n_downsampled = nrow(downsampled_df)
+    @info "Downsampled from $n_original to $n_downsampled points (factor $factor)"
+    
+    return downsampled_df
+end
+
+
+"""
+    mirror_mu_data(df::AbstractDataFrame)
+
+Mirror the data about mu=0. If all mu values are >= 0, create mirror copies with -mu.
+Useful for creating symmetric butterfly plots around the origin.
+
+Returns the original DataFrame if already symmetric, or vcat of original + mirrored.
+"""
+function mirror_mu_data(df::AbstractDataFrame)
+    min_mu = minimum(df.mu)
+    max_mu = maximum(df.mu)
+    
+    # Check if already symmetric (has both positive and negative)
+    has_neg = any(df.mu .< 0)
+    has_pos = any(df.mu .> 0)
+    
+    if has_neg && has_pos
+        @info "Data already symmetric around mu=0 (range: $min_mu to $max_mu). No mirroring needed."
+        return df
+    end
+    
+    if min_mu >= 0
+        @info "Mirroring data about mu=0 (original range: $min_mu to $max_mu)"
+        df_mirror = copy(df)
+        df_mirror.mu .= .-df_mirror.mu  # Negate mu values
+        return vcat(df, df_mirror)
+    else
+        @warn "Unexpected mu range: $min_mu to $max_mu. No mirroring applied."
+        return df
+    end
+end
+
+
+"""
+    compute_mu_bounds_specloc(df::AbstractDataFrame, by_cols::Vector{Symbol})
+
+Compute global_min_mu and global_max_mu bounds per parameter group.
+Faithful to IDOP's approach: groups data and extracts mu range for each combination.
+
+Args:
+    df: DataFrame with :mu, :phi, :Delta, and optionally :x0
+    by_cols: Parameter columns to group by, e.g. [:phi, :Delta, :x0] for per-x0
+             or [:phi, :Delta] for x0-averaged
+
+Returns:
+    DataFrame with parameter columns + :global_min_mu + :global_max_mu
+    (Analogous to IDOP's norm CSV structure)
+"""
+function compute_mu_bounds_specloc(df::AbstractDataFrame, by_cols::Vector{Symbol})
+    # Ensure all grouping columns exist
+    for col in by_cols
+        if !(col in names(df))
+            error("Column $col not found in DataFrame. Available: $(names(df))")
+        end
+    end
+    
+    # Create mu_specloc_invariant column (the x-axis values to be normalized)
+    if !("mu_specloc_invariant" in names(df))
+        df = copy(df)
+        df[!, :mu_specloc_invariant] = df.mu
+    end
+    
+    # Group and compute bounds per parameter combination
+    bounds_df = combine(
+        groupby(df, by_cols),
+        :mu_specloc_invariant => minimum => :global_min_mu,
+        :mu_specloc_invariant => maximum => :global_max_mu,
+        :N => first => :N,
+        :Delta => first => :Delta
+    )
+    
+    @info "Computed mu bounds for $(nrow(bounds_df)) parameter groups"
+    
+    return bounds_df
+end
+
+
+"""
+    apply_mu_normalisation!(df::AbstractDataFrame, bounds_df::AbstractDataFrame; 
+                             by_cols::Vector{Symbol}=[:phi, :Delta, :x0])
+
+Apply mu normalization using pre-computed bounds (IDOP-faithful approach).
+Normalizes mu values to [-1, 1] range using: 2 * (x - global_min_mu) / (global_max_mu - global_min_mu) - 1
+
+Creates column :mu_specloc_invariant_norm with normalized mu values.
+
+Args:
+    df: Data DataFrame with :mu column
+    bounds_df: Bounds DataFrame from compute_mu_bounds_specloc()
+    by_cols: Parameter columns to match on (must match those used in bounds computation)
+
+Returns:
+    df with added :mu_specloc_invariant_norm column
+"""
+function apply_mu_normalisation!(df::AbstractDataFrame, bounds_df::AbstractDataFrame; 
+                                  by_cols::Vector{Symbol}=[:phi, :Delta, :x0])
+    # Ensure mu_specloc_invariant exists
+    if !("mu_specloc_invariant" in names(df))
+        df = copy(df)
+        df[!, :mu_specloc_invariant] = df.mu
+    end
+    
+    # Create lookup dict for O(1) bound retrieval
+    bounds_dict = Dict()
+    
+    @inbounds for row in eachrow(bounds_df)
+        # Create key from specified parameter columns
+        key = Tuple(row[col] for col in by_cols)
+        bounds_dict[key] = (row.global_min_mu, row.global_max_mu)
+    end
+    
+    # Apply normalization with parameter matching (like IDOP's apply_outer_normalisation!)
+    norm_values = similar(df.mu_specloc_invariant, Float64)
+    n_unmatched = 0
+    
+    @inbounds for i in 1:nrow(df)
+        # Build lookup key from DataFrame row
+        key = Tuple(df[i, col] for col in by_cols)
+        
+        if haskey(bounds_dict, key)
+            vmin, vmax = bounds_dict[key]
+            val = df.mu_specloc_invariant[i]
+            
+            if vmax ≈ vmin
+                norm_values[i] = 0.0
+            else
+                norm_values[i] = 2 * (val - vmin) / (vmax - vmin) - 1
+            end
+        else
+            norm_values[i] = missing
+            n_unmatched += 1
+        end
+    end
+    
+    if n_unmatched > 0
+        @warn "Could not match $n_unmatched rows to bounds (missing parameter combination)"
+    end
+    
+    df[!, :mu_specloc_invariant_norm] = norm_values
+    @info "Applied mu normalization to $(nrow(df)) rows"
+    
+    return df
+end
+
+
+end  # end module SpecLocProcessing

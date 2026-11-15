@@ -28,7 +28,7 @@ const T1_FIXED = 1.0
 const T2_FIXED = 1.0
 const SWEEP_MODE = :vary_t2
 
-function parse_point_key(key::String)
+function parse_point_key(key::AbstractString)
     """Parse point_key 'rho|u' into (rho, u)"""
     parts = split(key, "|")
     return parse(Float64, parts[1]), parse(Float64, parts[2])
@@ -165,11 +165,12 @@ function main()
     if save_path !== nothing
         println("[plot_phase_boundary] Saving plot to: $save_path")
         savefig(p, save_path)
-    end
-    
-    if show_plot
-        println("[plot_phase_boundary] Displaying plot...")
-        display(p)
+    elseif show_plot
+        # In non-interactive mode, save to default file and notify user
+        default_path = "phase_boundary.png"
+        println("[plot_phase_boundary] Saving plot to: $default_path")
+        savefig(p, default_path)
+        println("[plot_phase_boundary] Plot saved. Open '$default_path' to view.")
     end
     
     println("[plot_phase_boundary] Done.")

@@ -43,11 +43,11 @@ target_phason = 0.0  # only used if :target_phason
 phason_tolerance = 0.0001  # only used if :target_phason
 
 # Parameter ranges (full vectors; will be chunked per row)
-Ns      = [200] #[5,10,50,100,500,1000,5000,10000]                       # Vector{Int} (not chunked)
-mus_all = collect(0.0:0.0001:4.5) #vcat(collect(range(0.6, 1.4, 401)), collect(range(1.8, 2.2, 201)))  # Vector{Float64}
-Deltas  = [0.05] #[0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]             # Vector{Float64}
+Ns      = [500] #[5,10,50,100,500,1000,5000,10000]                       # Vector{Int} (not chunked)
+mus_all = collect(range(0.0, 3.0, 1201)) #collect(0.0:0.0001:4.5) #vcat(collect(range(0.6, 1.4, 401)), collect(range(1.8, 2.2, 201)))  # Vector{Float64}
+Deltas  = collect(range(0.01, 0.1, 10)) #[0.01, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5]             # Vector{Float64}
 t1s     = [1.0]                  # Vector{Float64}
-t2s     = collect(logrange(1.0, 2.5, 501)) #collect(range(1.0, 3.0, 1001)) #[1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 2.0, 2.5, 3.0] #[1.5] #, 3.0, 3.5, 4.0, 4.5, 5.0]             # Vector{Float64}
+t2s     = [1.5] #collect(logrange(1.0, 2.5, 501)) #collect(range(1.0, 3.0, 1001)) #[1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 2.0, 2.5, 3.0] #[1.5] #, 3.0, 3.5, 4.0, 4.5, 5.0]             # Vector{Float64}
 t3s     = Float64[]                   # Vector{Float64} (empty = no t3)
 
 # Auto-mu configuration
@@ -79,13 +79,13 @@ target_number_of_rows = 200 # Target number of rows (jobs) to generate
 # Chunking parameters for each
 N_vals_per_row = length(Ns)
 N_split_mode = :contiguous
-mu_vals_per_row = (length(mus_all)÷10) + 1 # This can safely exceed the number of mu values per row when using :auto_mu mode
+mu_vals_per_row = 30 #(length(mus_all)÷10) + 1 # This can safely exceed the number of mu values per row when using :auto_mu mode
 mu_split_mode = :contiguous  # :contiguous or :roundrobin
 delta_vals_per_row = length(Deltas)
 delta_split_mode = :contiguous
 t1_vals_per_row = 1
 t1_split_mode = :contiguous
-t2_vals_per_row = ((length(t2s)-1)÷20) + 1
+t2_vals_per_row = 1 #((length(t2s)-1)÷20) + 1
 t2_split_mode = :contiguous
 t3_vals_per_row = 1  # if t3s not empty
 t3_split_mode = :contiguous

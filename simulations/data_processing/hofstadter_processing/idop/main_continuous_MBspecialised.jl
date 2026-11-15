@@ -7,6 +7,50 @@ using Logging
 using Colors, ColorSchemes, Plots
 using ProgressMeter
 
+function parse_plot_options(args)
+    nxn = 5000
+    render_mode = :scatter
+    markersize = 1.0
+    marker = :square
+    ignore_mu_centreline = false
+    for arg in args
+        parts = split(arg, '='; limit=2)
+        length(parts) == 2 || error("Invalid argument '$arg'. Use key=value syntax.")
+        key = lowercase(strip(parts[1]))
+        value = strip(parts[2])
+        if key == "nxn"
+            nxn = parse(Int, value)
+            nxn > 0 || error("nxn must be a positive pixel dimension")
+        elseif key == "render_mode"
+            mode = Symbol(lowercase(value))
+            mode in (:scatter, :raster) || error("render_mode must be scatter or raster")
+            render_mode = mode
+        elseif key == "markersize"
+            markersize = parse(Float64, value)
+            markersize > 0 || error("markersize must be positive")
+        elseif key == "marker"
+            marker = Symbol(lowercase(value))
+            marker in (:circle, :square, :diamond, :hexagon, :cross, :x, :utriangle, :dtriangle, :star5) || error("marker must be one of: circle, square, diamond, hexagon, cross, x, utriangle, dtriangle, star5")
+        elseif key == "ignore_mu_centreline"
+            bool_value = lowercase(value)
+            bool_value in ("true", "false") || error("ignore_mu_centreline must be true or false")
+            ignore_mu_centreline = parse(Bool, bool_value)
+        else
+            error("Unsupported argument '$arg'. Usage: julia -i main_continuous_MBspecialised.jl nxn=<pixels> render_mode=<scatter|raster> markersize=<size> marker=<shape> ignore_mu_centreline=<true|false>")
+        end
+    end
+    return (; plot_size=(nxn, nxn), render_mode, markersize, marker, ignore_mu_centreline)
+end
+
+plot_options = parse_plot_options(ARGS)
+plot_size = plot_options.plot_size
+continuous_render_mode = plot_options.render_mode
+continuous_markersize = plot_options.markersize
+continuous_marker = plot_options.marker
+ignore_mu_centreline = plot_options.ignore_mu_centreline
+@info "Continuous MP plot size: $(plot_size[1])×$(plot_size[2]) pixels"
+@info "Continuous MP rendering options" render_mode=continuous_render_mode markersize=continuous_markersize marker=continuous_marker ignore_mu_centreline=ignore_mu_centreline
+
 ## data variable for found mp_tol ranges
 struct MPTolResult
     N::Int64
@@ -414,7 +458,7 @@ end
             norm_filename;
             target_col=:mu_range,
             out_col=:mu_range_norm,
-            verbose_warnings=false,
+            reference_mu=0.0,
         )
         x_plot_col = :mu_range_norm
     end
@@ -437,6 +481,11 @@ end
             plt_xlims=plot_xlims,
             clims=(-1.0, 0.0),
             cmap=:viridis,
+            plot_size=plot_size,
+            render_mode=continuous_render_mode,
+            markersize=continuous_markersize,
+            marker=continuous_marker,
+            ignore_mu_centreline=ignore_mu_centreline,
         )
 
     catch e

@@ -243,6 +243,110 @@ function plt_mp_vs_mu_multiline_L(
     return p
 end
 
+function mp_size_trend(df::DataFrame; min_N::Int=100, max_N::Int=1000, min_points::Int=3)
+    size_rows = filter(row -> min_N <= row.N <= max_N, df)
+    if isempty(size_rows)
+        error("No rows found with N between $min_N and $max_N.")
+    end
+
+    size_rows = combine(groupby(size_rows, [:mu, :N]), :mp => mean => :mp)
+    sort!(size_rows, [:mu, :N])
+    trends = DataFrame(
+        mu=Float64[],
+        robust_slope=Float64[],
+        kendall_tau=Float64[],
+        direction_agreement=Float64[],
+        n_sizes=Int[],
+        min_N=Int[],
+        max_N=Int[],
+        phase=Union{Missing, Int}[]
+    )
+
+    for mu_rows in groupby(size_rows, :mu)
+        Ns = Float64.(mu_rows.N)
+        MPs = Float64.(mu_rows.mp)
+        pair_slopes = Float64[]
+        concordant = 0
+        discordant = 0
+        for i in 1:(length(Ns) - 1), j in (i + 1):length(Ns)
+            push!(pair_slopes, (MPs[j] - MPs[i]) / (Ns[j] - Ns[i]))
+            if MPs[j] > MPs[i]
+                concordant += 1
+            elseif MPs[j] < MPs[i]
+                discordant += 1
+            end
+        end
+
+        slope = length(Ns) >= min_points ? median(pair_slopes) : NaN
+        comparable_pairs = concordant + discordant
+        tau = comparable_pairs == 0 ? NaN : (concordant - discordant) / comparable_pairs
+        agreement = comparable_pairs == 0 || !isfinite(slope) || iszero(slope) ? NaN :
+                (slope > 0 ? concordant : discordant) / comparable_pairs
+        phase = !isfinite(slope) || iszero(slope) ? missing : (slope > 0 ? 0 : 1)
+        push!(trends, (Float64(mu_rows.mu[1]), slope, tau, agreement,
+                       length(Ns), Int(minimum(Ns)), Int(maximum(Ns)), phase))
+    end
+
+    return size_rows, trends
+end
+
+function plot_mp_with_size_invariant(
+    df::DataFrame,
+    filename::String;
+    min_N::Int=100,
+    max_N::Int=1000,
+    diagnostics_filename::String=replace(filename, r"\.[^.]+$" => "_diagnostics.csv")
+)
+    size_rows, trends = mp_size_trend(df; min_N=min_N, max_N=max_N)
+    mu_values = trends.mu
+    y_limits = (-1.01, 0.01)
+    p = plot(
+        xlabel="Chemical potential, μ",
+        ylabel="Majorana polarization, MP",
+        title="MP vs μ: green = phase 0 (dMP/dN > 0), red = phase 1 (dMP/dN < 0); N=$(min_N)–$(max_N)",
+        legend=false,
+        grid=false,
+        ylims=y_limits,
+        xlims=extrema(mu_values),
+        size=(1100, 360)
+    )
+
+    if length(mu_values) > 1
+        boundaries = [(mu_values[i] + mu_values[i + 1]) / 2 for i in 1:(length(mu_values) - 1)]
+        left_edges = vcat(mu_values[1] - (boundaries[1] - mu_values[1]), boundaries)
+        right_edges = vcat(boundaries, mu_values[end] + (mu_values[end] - boundaries[end]))
+        for i in eachindex(mu_values)
+            phase = trends.phase[i]
+            ismissing(phase) && continue
+            shade = phase == 0 ? :seagreen : :indianred
+            shape = Shape([left_edges[i], right_edges[i], right_edges[i], left_edges[i]],
+                          [y_limits[1], y_limits[1], y_limits[2], y_limits[2]])
+            plot!(p, shape; fillcolor=shade, fillalpha=0.18, linealpha=0, label="")
+        end
+    end
+
+    for N in sort(unique(size_rows.N))
+        N_rows = filter(:N => ==(N), size_rows)
+        sort!(N_rows, :mu)
+        plot!(p, N_rows.mu, N_rows.mp; linewidth=1.5, label="", color=:steelblue)
+    end
+
+    open(diagnostics_filename, "w") do io
+        println(io, "mu,robust_slope_dMP_dN,kendall_tau,direction_agreement,n_sizes,min_N,max_N,phase")
+        for row in eachrow(trends)
+            phase = ismissing(row.phase) ? "" : string(row.phase)
+            println(io, "$(row.mu),$(row.robust_slope),$(row.kendall_tau),$(row.direction_agreement),$(row.n_sizes),$(row.min_N),$(row.max_N),$phase")
+        end
+    end
+
+    savefig(p, filename)
+    println("Invariant plot saved to: $filename")
+    println("Per-mu trend diagnostics saved to: $diagnostics_filename")
+    println("Phase assignment: positive robust slope = 0; negative robust slope = 1; zero/insufficient data = unclassified.")
+    println("Direction agreement is the fraction of non-tied size pairs matching the Theil-Sen slope sign.")
+    return p, trends
+end
+
 # plt_mp_vs_mu_multiline_L(df, joinpath(output_path, "mp_vs_mu_all_L_restricted.png"); restrict_Ns=true, max_N=1000)
 
 ## combine dfs df_new and df_old filtering for unique N
@@ -256,3 +360,13 @@ ignore_Ns = [5, 10, 50, 800, 5000, 10000]
 
 plt_mp_vs_mu_multiline_L(df_combined, joinpath(output_path, "mp_vs_mu_all_L_all_restricted.svg")
 ; restrict_Ns=true, ignore_Ns=ignore_Ns)
+
+invariant_plot_path = joinpath(output_path, "mp_vs_mu_N100_1000_theilsen_invariant.svg")
+invariant_diagnostics_path = joinpath(output_path, "mp_vs_mu_N100_1000_theilsen_diagnostics.csv")
+invariant_plot, invariant_trends = plot_mp_with_size_invariant(
+    df_combined,
+    invariant_plot_path;
+    min_N=100,
+    max_N=1000,
+    diagnostics_filename=invariant_diagnostics_path
+)

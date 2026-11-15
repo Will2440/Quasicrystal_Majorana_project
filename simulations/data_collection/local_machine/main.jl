@@ -73,26 +73,26 @@ plastic_sequence = SeqGen.plastic_SeqGen(N_seq_seed)
 # seq_file = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/data_collection/auxilliary/local_mp_seq_sets/slopes_N1000_phason_0.61803-1-0.61803_nbins100_npb1_mapto(2, 1).bson"
 
 ## only fibonacci
-seq_file = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/data_collection/auxilliary/local_mp_seq_sets/slopes_N10000_literal_0.61803_phason_0.61803-1-0.61803_mapto(2, 1).bson"
+seq_file = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/data_collection/auxilliary/local_mp_seq_sets/slopes_N1000_phason_0.61803-1-0.61803_nbins100_npb1_mapto(2, 1).bson"
 indir = joinpath(project_root, "..", "auxilliary", "local_mp_seq_sets", seq_file)
 indir = normpath(indir)
 sturm_df = SeqGen.load_sturmian_seq_bson(indir)
 
 ## N Range (even single value must be a Vector type)
-N_range = [200] #collect(round.(Int, logrange(100, 3000, length=10))) # [200]
+N_range = [500] #collect(round.(Int, logrange(100, 3000, length=10))) # [200]
 
 ## t_n Range (combine any number of different hopping ranges)
 t1_range = collect(range(1.0, 1.0, 1))
-t2_range = collect(range(1.0, 10.0, 11))
+t2_range = collect(range(1.5, 1.5, 1))
 t3_range = [2.0, 3.0, 4.0]
 t_ranges = [t1_range, t2_range]#, t3_range]
 t_combinations = ParamCombGen.t_ranges_combs(t_ranges)
 
 ## mu Range (even single value must be a Vector type)
-mu_range = collect(range(0.0, 4.5, length=201))
+mu_range = collect(range(0.0, 3.0, length=1201))
 
 ## Delta Range (even single value must be a vector type)
-Delta_range = [0.05] #collect(range(0.01, 1.0, 101))
+Delta_range = collect(range(0.01, 0.1, 10))
 
 
 ## Sequence Chunking (use this to generate sequence samples which can be compared)
@@ -142,18 +142,19 @@ omega_range = collect(-3.0:0.1:3.0)
 
 alpha = 0.125
 N = N_range[1]
-x0s = collect(range(N/2 - alpha * N, N/2 + alpha * N, length=10))
-# x0s=[N/2]
+# x0s = collect(range(N/2 - alpha * N, N/2 + alpha * N, length=10))
+x0s=[N/2]
 
 
-kappas =  collect(logrange(1e-5, 1e-1, length=10)) # collect(range(1e-4, 5e-2, length=25))
+kappas =  [2.5e-4] #collect(logrange(1e-5, 1e-2, length=16)) # collect(range(1e-4, 5e-2, length=25))
+n_lowest_evals = 4
 
 
 ###########################################################
 ################## Sec 2: Data Save Path ##################
 ###########################################################
 
-project_name = "spec_loc_qc-sc_comp" #"local_mp_data"
+project_name = "specloc_phason_winding_recalc" #"local_mp_data"
 
 root_path = joinpath(project_root, "../../../simulations/raw_data")
 if length(t_ranges) < 3
@@ -187,7 +188,7 @@ function get_user_options()
         :np,     # calc_precision: :hp, :np
         :none, # save_evecs: :all_np, :all_hp, :maj_np, :maj_hp, :none
         :all_np, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
-        :spec_loc # solver_type: :generic, seq_scaled, :mu_loop, :N_loop, :restricted, :phason_loop, :spec_loc
+        :generic # solver_type: :generic, seq_scaled, :mu_loop, :N_loop, :restricted, :phason_loop, :spec_loc, :spec_loc_fast
     )
 end
 
@@ -300,7 +301,8 @@ run_selected_solver(
     tbar=tbar,
     preserve_symbol=preserve_symbol,
     x0s=x0s,
-    kappas=kappas
+    kappas=kappas,
+    n_lowest_evals=n_lowest_evals
 )
 
 end_time = now()

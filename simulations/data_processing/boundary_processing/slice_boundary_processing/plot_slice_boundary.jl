@@ -1,5 +1,6 @@
 #!/usr/bin/env julia
 
+using DataFrames
 using Plots
 include(joinpath(@__DIR__, "slice_data.jl"))
 using .SliceBoundaryData
@@ -13,6 +14,7 @@ function main()
     run_dir = abspath(ARGS[1])
     save_path = nothing
     show_points = false
+    show_transition_labels = false
     i = 2
     while i <= length(ARGS)
         if ARGS[i] == "--save"
@@ -21,6 +23,8 @@ function main()
             save_path = abspath(ARGS[i])
         elseif ARGS[i] == "--points"
             show_points = true
+        elseif ARGS[i] == "--show-transition-labels"
+            show_transition_labels = true
         else
             error("Unknown option: $(ARGS[i])")
         end
@@ -33,7 +37,7 @@ function main()
         xlabel="ρ = t₂/t₁",
         ylabel="μ",
         title="Slice-search phase boundaries",
-        legend=:topright,
+        legend=:topleft,
         size=(1000, 700),
         dpi=150,
     )
@@ -53,23 +57,30 @@ function main()
         label = track_id == 0 ? "Onset-refinement transitions" : "Transition track $track_id"
         color = track_id == 0 ? :black : colors[mod1(idx, length(colors))]
         yerr = (subset.mu .- subset.mu_lo, subset.mu_hi .- subset.mu)
-        scatter!(p, subset.rho, subset.mu; yerror=yerr, label=label, color=color, markersize=3)
+        if show_transition_labels || track_id == 0
+            scatter!(p, subset.rho, subset.mu; yerror=yerr, label=label, color=color, markersize=3)
+        else
+            scatter!(p, subset.rho, subset.mu; yerror=yerr, label="", color=color, markersize=3)
+        end
         if track_id != 0 && nrow(subset) > 1
             plot!(p, subset.rho, subset.mu; color=color, alpha=0.65, label="")
         end
     end
 
+    trivial_gaps = trivial_gap_counts(summary)
+    gap_ticks = isempty(trivial_gaps) ? [0, 1] : minimum(trivial_gaps):maximum(trivial_gaps)
     gap_plot = plot(
         summary.rho,
-        summary.gap_count;
+        trivial_gaps;
         xlabel="ρ = t₂/t₁",
-        ylabel="Trivial intervals",
-        label="Gap count",
+        ylabel="Trivial gap count",
+        label="Trivial gap count",
         color=:darkgreen,
         linewidth=2,
         marker=:diamond,
         markersize=3,
         legend=:topright,
+        yticks=gap_ticks,
         size=(1000, 300),
         dpi=150,
     )

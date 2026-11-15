@@ -23,7 +23,7 @@ const T1_FIXED = 1.0
 const T2_FIXED = 1.0
 const SWEEP_MODE = :vary_t2
 
-function parse_point_key(key::String)
+function parse_point_key(key::AbstractString)
     parts = split(key, "|")
     return parse(Float64, parts[1]), parse(Float64, parts[2])
 end

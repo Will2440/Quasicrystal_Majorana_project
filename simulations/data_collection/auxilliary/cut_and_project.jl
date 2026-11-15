@@ -579,12 +579,12 @@ target_slope = nothing
 ## Optional: Overwrite to define literal slope
 overwrite_bool = true
 if overwrite_bool
-    slopes =  [2/(1 + sqrt(5))] #[1/(1+sqrt(2))] #[0.6180048661800487]
+    slopes =  [1/(1+sqrt(2))]  #[2/(1 + sqrt(5))] #[0.6180048661800487]
     println("Overwriting slopes with literal value(s) for testing...")
 end
 # slopes = [target_slope]
 
-phason_angle_range = [2/(1 + sqrt(5))] #[1/(1+sqrt(2))] #collect(0.0:0.01:1.0)
+phason_angle_range = [1/(1+sqrt(2))]  #[2/(1 + sqrt(5))] #collect(0.0:0.01:1.0)
 n_phi = length(slopes)
 n_phason = length(phason_angle_range)
 slot_count = n_phi * n_phason
