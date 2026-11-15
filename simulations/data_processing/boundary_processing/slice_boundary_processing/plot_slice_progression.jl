@@ -9,10 +9,11 @@ function usage()
 end
 
 function make_frame(samples, transitions, summary, slice_index::Int)
+    axis = sweep_axis(summary)
     current_summary = filter(row -> row.slice_index <= slice_index, summary)
     current_transitions = filter(row -> row.slice_index <= slice_index, transitions)
     p = plot(
-        xlabel="ρ = t₂/t₁",
+        xlabel=axis == :Delta ? "Δ" : "ρ = t₂/t₁",
         ylabel="μ",
         title="Slice search progression: through slice $slice_index",
         legend=:topright,
@@ -23,25 +24,25 @@ function make_frame(samples, transitions, summary, slice_index::Int)
     visible_samples = filter(row -> row.slice_index <= slice_index, samples)
     for (phase, color, label) in ((0, :blue, "Trivial"), (1, :red, "Topological"))
         subset = filter(row -> row.phase_label == phase, visible_samples)
-        scatter!(p, subset.rho, subset.mu; label=label, color=color, alpha=0.35, markersize=2)
+        scatter!(p, subset[!, axis], subset.mu; label=label, color=color, alpha=0.35, markersize=2)
     end
 
     track_colors = [:orange, :green, :purple, :brown, :cyan, :magenta, :gray, :black]
     for track_id in sort(unique(Int.(current_transitions.track_id)))
-        subset = sort(filter(row -> row.track_id == track_id, current_transitions), :rho)
+        subset = sort(filter(row -> row.track_id == track_id, current_transitions), axis)
         color = track_id == 0 ? :black : track_colors[mod1(track_id, length(track_colors))]
         label = track_id == 0 ? "Onset probes" : "Boundary track $track_id"
         if nrow(subset) > 1 && track_id != 0
-            plot!(p, subset.rho, subset.mu; color=color, linewidth=1.5, label=label)
+            plot!(p, subset[!, axis], subset.mu; color=color, linewidth=1.5, label=label)
         else
-            scatter!(p, subset.rho, subset.mu; color=color, markersize=3, label=label)
+            scatter!(p, subset[!, axis], subset.mu; color=color, markersize=3, label=label)
         end
     end
 
     if !isempty(current_summary) && !isempty(visible_samples)
         latest = argmax(current_summary.slice_index)
         annotate!(p,
-            minimum(current_summary.rho), maximum(visible_samples.mu),
+            minimum(current_summary[!, axis]), maximum(visible_samples.mu),
             text("latest gap count: $(current_summary[latest, :gap_count])", 9, :left))
     end
     return p

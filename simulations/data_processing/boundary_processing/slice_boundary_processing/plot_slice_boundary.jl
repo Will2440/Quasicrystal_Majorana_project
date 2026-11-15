@@ -29,8 +29,11 @@ function main()
 
     transitions = load_transitions(run_dir)
     summary = load_slice_summary(run_dir)
+    axis = sweep_axis(summary)
+    xlabel = axis == :Delta ? "Δ" : "ρ = t₂/t₁"
+    sort!(summary, axis)
     p = plot(
-        xlabel="ρ = t₂/t₁",
+        xlabel=xlabel,
         ylabel="μ",
         title="Slice-search phase boundaries",
         legend=:topright,
@@ -42,27 +45,27 @@ function main()
         samples = load_samples(run_dir)
         for (phase, color, label) in ((0, :blue, "Trivial samples"), (1, :red, "Topological samples"))
             subset = filter(row -> row.phase_label == phase, samples)
-            scatter!(p, subset.rho, subset.mu; label=label, color=color, alpha=0.25, markersize=2)
+            scatter!(p, subset[!, axis], subset.mu; label=label, color=color, alpha=0.25, markersize=2)
         end
     end
 
     track_ids = sort(unique(Int.(transitions.track_id)))
     colors = [:black, :orange, :green, :purple, :brown, :cyan, :magenta, :gray]
     for (idx, track_id) in enumerate(track_ids)
-        subset = sort(filter(row -> row.track_id == track_id, transitions), :rho)
+        subset = sort(filter(row -> row.track_id == track_id, transitions), axis)
         label = track_id == 0 ? "Onset-refinement transitions" : "Transition track $track_id"
         color = track_id == 0 ? :black : colors[mod1(idx, length(colors))]
         yerr = (subset.mu .- subset.mu_lo, subset.mu_hi .- subset.mu)
-        scatter!(p, subset.rho, subset.mu; yerror=yerr, label=label, color=color, markersize=3)
+        scatter!(p, subset[!, axis], subset.mu; yerror=yerr, label=label, color=color, markersize=3)
         if track_id != 0 && nrow(subset) > 1
-            plot!(p, subset.rho, subset.mu; color=color, alpha=0.65, label="")
+            plot!(p, subset[!, axis], subset.mu; color=color, alpha=0.65, label="")
         end
     end
 
     gap_plot = plot(
-        summary.rho,
+        summary[!, axis],
         summary.gap_count;
-        xlabel="ρ = t₂/t₁",
+        xlabel=xlabel,
         ylabel="Trivial intervals",
         label="Gap count",
         color=:darkgreen,

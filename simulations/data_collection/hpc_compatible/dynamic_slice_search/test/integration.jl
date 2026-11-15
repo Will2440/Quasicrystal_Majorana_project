@@ -5,6 +5,7 @@ using DataFrames
 using JLD2
 
 include(joinpath(@__DIR__, "..", "master_slice.jl"))
+include(joinpath(@__DIR__, "..", "..", "..", "..", "data_processing", "boundary_processing", "slice_boundary_processing", "slice_data.jl"))
 module SliceMergeTest
 include(joinpath(@__DIR__, "..", "merge_slice_runs.jl"))
 end
@@ -41,7 +42,8 @@ end
             :sequence_bson_path => sequence_path, :target_slope => 0.5, :N => 4,
             :output_root => directory, :run_root_pointer_file => joinpath(directory, "latest.txt"),
             :global_stop_file => joinpath(directory, "stop"), :t1_fixed => 1.0, :t2_fixed => 1.5,
-            :Delta_start => 0.0, :Delta_max => 0.2, :n_Delta_slices => 2,
+            :Delta_start => 0.2, :Delta_max => 0.0, :n_Delta_slices => 2,
+            :Delta_spacing_mode => :linear,
             :Delta_onset_tol => 0.026, :Delta_onset_max_extra_slices => 10,
             :rho_start => 1.0, :rho_max => 2.0, :n_rho_slices => 2,
             :mu_baseline_points => 9, :gap_refine_max_depth => 0, :transition_mu_tol => 0.02,
@@ -62,6 +64,7 @@ end
                 run_root = strip(read(cfg[:run_root_pointer_file], String))
                 run_roots[parameter] = run_root
                 summary = CSV.read(joinpath(run_root, "slice_summary.csv"), DataFrame)
+                @test SliceBoundaryData.sweep_axis(summary) == parameter
                 transitions = CSV.read(joinpath(run_root, "transition_boundaries.csv"), DataFrame)
                 points = CSV.read(joinpath(run_root, "slices", "slice_0001", "point_results.csv"), DataFrame)
                 onsets = CSV.read(joinpath(run_root, "onset_brackets.csv"), DataFrame)
@@ -72,6 +75,8 @@ end
                 @test metadata["sweep_parameter"] == parameter
                 if parameter == :Delta
                     @test all(==(1.5), summary.rho)
+                    @test summary.Delta[1:2] ≈ [0.2, 0.0]
+                    @test summary.n_baseline[1:2] == [9, 17]
                     @test all(summary.Delta .== summary.sweep_value)
                     @test length(unique(summary.mu_critical)) == 1
                     @test unique(summary.mu_critical) ≈ [2.5]
@@ -97,6 +102,7 @@ end
             filter!(row -> row.slice_index == 1, legacy_summary)
             filter!(row -> row.slice_index == 1, legacy_transitions)
             select!(legacy_summary, Not([:Delta, :sweep_value, :sweep_parameter, :mu_min, :mu_max, :mu_critical]))
+            @test SliceBoundaryData.sweep_axis(legacy_summary) == :rho
             select!(legacy_transitions, Not([:Delta, :sweep_value, :sweep_parameter]))
             CSV.write(joinpath(legacy, "slice_summary.csv"), legacy_summary)
             CSV.write(joinpath(legacy, "transition_boundaries.csv"), legacy_transitions)

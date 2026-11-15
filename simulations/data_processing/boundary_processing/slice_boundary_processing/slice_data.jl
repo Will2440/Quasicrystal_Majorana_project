@@ -3,7 +3,19 @@ module SliceBoundaryData
 using CSV
 using DataFrames
 
-export load_transitions, load_slice_summary, load_samples, available_slices
+export load_transitions, load_slice_summary, load_samples, available_slices, sweep_axis
+
+function sweep_axis(summary)
+    :sweep_parameter in propertynames(summary) || return :rho
+    parameters = unique(collect(skipmissing(summary.sweep_parameter)))
+    isempty(parameters) && return :rho
+    length(parameters) == 1 || error("Mixed sweep parameters in slice summary")
+    parameter = only(parameters)
+    parameter in ("rho", "Delta") || error("Unknown sweep parameter: $parameter")
+    axis = Symbol(parameter)
+    axis in propertynames(summary) || error("Missing sweep column: $axis")
+    return axis
+end
 
 function require_run_dir(run_dir::AbstractString)
     isdir(run_dir) || error("Run directory not found: $run_dir")
@@ -58,7 +70,7 @@ function load_samples(run_dir::AbstractString; max_slice_index::Union{Nothing,In
         push!(frames, frame)
     end
     isempty(frames) && return DataFrame(
-        slice_index=Int[], rho=Float64[], mu=Float64[], u=Float64[],
+        slice_index=Int[], rho=Float64[], Delta=Float64[], mu=Float64[], u=Float64[],
         phase_label=Int[], topo_fraction=Float64[], gap_min=Float64[])
     return vcat(frames...; cols=:union)
 end

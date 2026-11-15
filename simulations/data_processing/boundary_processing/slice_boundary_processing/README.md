@@ -18,7 +18,7 @@ Reads `transition_boundaries.csv`, joins each transition to its slice gap count,
 julia plot_slice_boundary.jl <run_directory> [--save output.png] [--points]
 ```
 
-Plots refined transition positions and their mu bracket widths against rho, connects tracked boundaries, and shows the trivial-interval count in an aligned panel. `--points` overlays all evaluated phase labels.
+Plots refined transition positions and their mu bracket widths against the sweep parameter (rho or Delta), connects tracked boundaries, and shows the trivial-interval count in an aligned panel. `--points` overlays all evaluated phase labels. Legacy files without a sweep parameter are treated as rho sweeps.
 
 ### Plot algorithm progression
 

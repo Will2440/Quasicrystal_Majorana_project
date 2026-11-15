@@ -36,6 +36,24 @@ sample(mu, phase; gap=0.1) = (mu=Float64(mu), phase_label=Int(phase), gap_min=Fl
     @test_throws ErrorException SliceSweep.sweep_grid(cfg)
     cfg[:Delta_start] = 0.01
     @test SliceSweep.sweep_grid(cfg) ≈ [0.01, sqrt(0.002), 0.2]
+    cfg[:Delta_start] = 1.0
+    cfg[:Delta_max] = 0.0
+    cfg[:n_Delta_slices] = 41
+    cfg[:Delta_spacing_mode] = :exponential
+    grid = SliceSweep.sweep_grid(cfg)
+    @test grid[1] == 1.0 && grid[end] == 0.0
+    @test all(diff(grid) .< 0)
+    @test abs(grid[end] - grid[end - 1]) < abs(grid[2] - grid[1]) / 30
+    @test SliceSweep.sweep_progress(1.0, cfg) == 0.0
+    @test SliceSweep.sweep_progress(0.5, cfg) == 0.5
+    @test SliceSweep.sweep_progress(0.0, cfg) == 1.0
+    cfg[:Delta_spacing_mode] = :linear
+    cfg[:n_Delta_slices] = 3
+    @test SliceSweep.sweep_grid(cfg) ≈ [1.0, 0.5, 0.0]
+    cfg[:Delta_spacing_mode] = :log
+    @test_throws ErrorException SliceSweep.sweep_grid(cfg)
+    cfg[:Delta_max] = 0.01
+    @test SliceSweep.sweep_grid(cfg) ≈ [1.0, 0.1, 0.01]
     cfg[:t1_fixed] = 0.0
     @test_throws ErrorException SliceSweep.fixed_mu_critical(cfg, 0.5)
 end
@@ -145,7 +163,7 @@ end
     track = TransitionTracking.EdgeTrack(
         1,
         (0, 1),
-        [(rho=1.0, mu=1.0), (rho=1.1, mu=1.1), (rho=1.2, mu=1.2), (rho=1.3, mu=1.3)],
+        [(sweep_value=1.0, mu=1.0), (sweep_value=1.1, mu=1.1), (sweep_value=1.2, mu=1.2), (sweep_value=1.3, mu=1.3)],
         4,
     )
     prediction = only(TransitionTracking.predict_edges([track], 1.4, 5, (0.0, 10.0), cfg))
@@ -153,6 +171,14 @@ end
     @test prediction.predicted_motion ≈ 0.1
     @test prediction.band_half_width ≈ 0.3
     @test prediction.curvature_uncertainty ≈ 0.0
+    descending = TransitionTracking.EdgeTrack(
+        2, (0, 1),
+        [(sweep_value=1.0, mu=1.0), (sweep_value=0.9, mu=1.1),
+         (sweep_value=0.8, mu=1.2), (sweep_value=0.7, mu=1.3)], 4)
+    prediction = only(TransitionTracking.predict_edges([descending], 0.6, 5, (0.0, 10.0), cfg))
+    @test prediction.mu ≈ 1.32
+    @test prediction.predicted_motion ≈ 0.1
+    @test prediction.curvature_uncertainty ≈ 0.0 atol=1e-14
 end
 
 @testset "Ordered matching protects established boundaries" begin
@@ -191,6 +217,6 @@ end
     @test ids[2] == 2
     @test ids[1] != 2
     @test tracks[2].history[end].mu == 8.1
-    @test tracks[2].history[end].rho == 1.2
+    @test tracks[2].history[end].sweep_value == 1.2
     @test tracks[1].last_seen == 2
 end

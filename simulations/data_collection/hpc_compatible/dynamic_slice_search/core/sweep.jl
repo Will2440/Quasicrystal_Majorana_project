@@ -3,7 +3,7 @@ module SliceSweep
 using ..DynamicBandwidth
 using ..SliceSearch
 
-export sweep_parameter, sweep_grid, fixed_mu_critical, physical_parameters
+export sweep_parameter, sweep_grid, sweep_progress, fixed_mu_critical, physical_parameters
 
 sweep_parameter(cfg) = get(cfg, :sweep_parameter, :rho)
 
@@ -13,22 +13,19 @@ function sweep_grid(cfg)
         return SliceSearch.build_rho_grid(cfg[:rho_start], cfg[:rho_max],
                                           cfg[:n_rho_slices], cfg[:rho_spacing_mode])
     elseif parameter == :Delta
-        start, stop = Float64(cfg[:Delta_start]), Float64(cfg[:Delta_max])
-        count, spacing = Int(cfg[:n_Delta_slices]), cfg[:Delta_spacing_mode]
-        isfinite(start) && isfinite(stop) && start >= 0 && stop >= start ||
-            error("Delta range must be finite, nonnegative, and increasing")
-        count >= 1 || error("n_Delta_slices must be at least one")
-        if spacing == :linear
-            count == 1 && return [start]
-            return collect(range(start, stop; length=count))
-        elseif spacing == :log
-            start > 0 || error("Delta_start must be positive for logarithmic spacing")
-            count == 1 && return [start]
-            return exp.(range(log(start), log(stop); length=count))
-        end
-        error("Unknown Delta spacing mode: $spacing (expected :linear or :log)")
+        return SliceSearch.build_delta_grid(cfg[:Delta_start], cfg[:Delta_max],
+            cfg[:n_Delta_slices], cfg[:Delta_spacing_mode];
+            concentration=get(cfg, :Delta_exponential_concentration, 4.0))
     end
     error("Unknown sweep_parameter: $parameter (expected :rho or :Delta)")
+end
+
+function sweep_progress(value::Real, cfg)
+    parameter = sweep_parameter(cfg)
+    start = Float64(cfg[parameter == :rho ? :rho_start : :Delta_start])
+    stop = Float64(cfg[parameter == :rho ? :rho_max : :Delta_max])
+    start == stop && return 0.0
+    return clamp((Float64(value) - start) / (stop - start), 0.0, 1.0)
 end
 
 function fixed_mu_critical(cfg, gamma::Real)

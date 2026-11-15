@@ -16,19 +16,20 @@ Dict{Symbol,Any}(
     :sequence_selection_mode => :closest,
 
     :N => 500,
-    :sweep_parameter => :rho,
+    :sweep_parameter => :Delta,
     :Delta => 0.05,
     :sweep_mode => :vary_t2,
     :t1_fixed => 1.0,
-    :t2_fixed => 1.0,
+    :t2_fixed => 1.5,
     :rho_start => 3.5,
     :rho_max => 4.5,
     :n_rho_slices => 5,
     :rho_spacing_mode => :linear,
-    :Delta_start => 0.0,
-    :Delta_max => 0.2,
+    :Delta_start => 1.0,
+    :Delta_max => 0.0,
     :n_Delta_slices => 41,
-    :Delta_spacing_mode => :linear,
+    :Delta_spacing_mode => :exponential,
+    :Delta_exponential_concentration => 4.0,
     :u_range => (0.0, 1.05),
 
     :x0_alpha => 0.125 / 2,
@@ -41,13 +42,13 @@ Dict{Symbol,Any}(
     :topological_fraction => 0.5,
 
     # Sparse full-range discovery scan: preserve physical-mu spacing and add
-    # only modest extra density toward rho_max. Narrower features may be missed.
+    # only modest extra density toward the sweep endpoint. Narrower features may be missed.
     :mu_baseline_points => 701,
     :discovery_rho_growth_factor => 2.0,
     :discovery_rho_growth_power => 1.0,
 
     # Dense local sampling follows tracked boundaries. Point count increases
-    # with rho; preserve the old 3% minimum band and expand it from observed
+    # toward the sweep endpoint; preserve the old 3% minimum band and expand it from observed
     # motion/curvature, up to a configured cap.
     :mu_refine_points_per_prediction => 75,
     :mu_refine_points_per_prediction_max => 201,

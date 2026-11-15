@@ -34,21 +34,23 @@ function predict_edges(tracks::Vector{EdgeTrack}, next_value::Real, current_slic
         if momentum_enabled && length(track.history) >= min_history
             prior = track.history[end - 2]
             delta_value = Float64(last.sweep_value) - Float64(prior.sweep_value)
-            if delta_value > 0
+            next_delta = Float64(next_value) - Float64(last.sweep_value)
+            if delta_value != 0 && next_delta * delta_value > 0
                 slope = (Float64(last.mu) - Float64(prior.mu)) / delta_value
-                raw_shift = damping * slope * (Float64(next_value) - Float64(last.sweep_value))
+                predicted_motion = abs(slope * next_delta)
+                raw_shift = damping * slope * next_delta
                 shift_cap = max_shift_fraction * mu_span
                 predicted_mu += clamp(raw_shift, -shift_cap, shift_cap)
 
                 if length(track.history) >= 4
                     earlier = track.history[end - 2]
                     older = track.history[end - 3]
-                    older_delta_rho = Float64(earlier.rho) - Float64(older.rho)
-                    recent_delta_rho = Float64(last.rho) - Float64(earlier.rho)
-                    if older_delta_rho > 0 && recent_delta_rho > 0
-                        older_slope = (Float64(earlier.mu) - Float64(older.mu)) / older_delta_rho
-                        recent_slope = (Float64(last.mu) - Float64(earlier.mu)) / recent_delta_rho
-                        curvature_uncertainty = abs(recent_slope - older_slope) * next_delta_rho
+                    older_delta = Float64(earlier.sweep_value) - Float64(older.sweep_value)
+                    recent_delta = Float64(last.sweep_value) - Float64(earlier.sweep_value)
+                    if older_delta * recent_delta > 0
+                        older_slope = (Float64(earlier.mu) - Float64(older.mu)) / older_delta
+                        recent_slope = (Float64(last.mu) - Float64(earlier.mu)) / recent_delta
+                        curvature_uncertainty = abs(recent_slope - older_slope) * abs(next_delta)
                     end
                 end
             end
@@ -74,12 +76,13 @@ function predict_edges(tracks::Vector{EdgeTrack}, next_value::Real, current_slic
     return predictions
 end
 
-function update_tracks!(tracks::Vector{EdgeTrack}, transitions, value::Real, slice_index::Int, mu_bounds, cfg::Dict{Symbol,Any})
-    mu_span = Float64(mu_bounds[2] - mu_bounds[1])
-    max_match = Float64(get(cfg, :track_match_max_fraction, 0.15)) * mu_span
-    unmatched_tracks = Set(eachindex(tracks))
-    next_id = isempty(tracks) ? 1 : maximum(t.id for t in tracks) + 1
-    transition_ids = Int[]
+function ordered_match_cost(active_tracks, transitions, predictions, mu_span::Float64, cfg)
+    n_tracks = length(active_tracks)
+    n_transitions = length(transitions)
+    skip_penalty = Float64(get(cfg, :track_unmatched_penalty, 0.75))
+    base_tolerance = Float64(get(cfg, :track_match_base_tolerance_fraction, 0.01)) * mu_span
+    max_tolerance = Float64(get(cfg, :track_match_max_tolerance_fraction, 0.05)) * mu_span
+    step_scale = Float64(get(cfg, :track_match_step_scale, 1.5))
 
     costs = fill(Inf, n_tracks + 1, n_transitions + 1)
     actions = fill(UInt8(0), n_tracks + 1, n_transitions + 1)
@@ -112,7 +115,6 @@ function update_tracks!(tracks::Vector{EdgeTrack}, transitions, value::Real, sli
             orientation = (Int(transition.phase_lo), Int(transition.phase_hi))
             distance = abs(predicted_mu - Float64(transition.mu))
 
-<<<<<<< HEAD
             if track.orientation == orientation && distance <= tolerance
                 match_cost = distance / max(tolerance, eps(Float64))
                 candidate = current + match_cost
@@ -121,19 +123,6 @@ function update_tracks!(tracks::Vector{EdgeTrack}, transitions, value::Real, sli
                     actions[i + 2, j + 2] = 0x03
                 end
             end
-=======
-        point = (sweep_value=Float64(value), mu=Float64(transition.mu))
-        if best_idx === nothing
-            push!(tracks, EdgeTrack(next_id, orientation, [point], slice_index))
-            push!(transition_ids, next_id)
-            next_id += 1
-        else
-            track = tracks[best_idx]
-            push!(track.history, point)
-            track.last_seen = slice_index
-            push!(transition_ids, track.id)
-            delete!(unmatched_tracks, best_idx)
->>>>>>> 74c2523d862875d3bae925d25af657775dd15f3a
         end
     end
 
@@ -157,7 +146,7 @@ function update_tracks!(tracks::Vector{EdgeTrack}, transitions, value::Real, sli
     return matches
 end
 
-function update_tracks!(tracks::Vector{EdgeTrack}, transitions, rho::Real, slice_index::Int, mu_bounds, cfg::Dict{Symbol,Any}; predictions=NamedTuple[])
+function update_tracks!(tracks::Vector{EdgeTrack}, transitions, value::Real, slice_index::Int, mu_bounds, cfg::Dict{Symbol,Any}; predictions=NamedTuple[])
     mu_span = Float64(mu_bounds[2] - mu_bounds[1])
     active_gap = Int(get(cfg, :track_max_missed_slices, 1))
     active_tracks = filter(track -> slice_index - track.last_seen <= active_gap, tracks)
@@ -173,7 +162,7 @@ function update_tracks!(tracks::Vector{EdgeTrack}, transitions, rho::Real, slice
     for (track_index, transition_index) in matches
         track = active_tracks[track_index]
         transition = ordered_transitions[transition_index]
-        push!(track.history, (rho=Float64(rho), mu=Float64(transition.mu)))
+        push!(track.history, (sweep_value=Float64(value), mu=Float64(transition.mu)))
         track.last_seen = slice_index
         transition_ids[transition_index] = track.id
     end
@@ -183,7 +172,7 @@ function update_tracks!(tracks::Vector{EdgeTrack}, transitions, rho::Real, slice
         transition_index in matched_transitions && continue
         transition = ordered_transitions[transition_index]
         orientation = (Int(transition.phase_lo), Int(transition.phase_hi))
-        point = (rho=Float64(rho), mu=Float64(transition.mu))
+        point = (sweep_value=Float64(value), mu=Float64(transition.mu))
         push!(tracks, EdgeTrack(next_id, orientation, [point], slice_index))
         transition_ids[transition_index] = next_id
         next_id += 1

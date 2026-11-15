@@ -25,18 +25,26 @@ function build_rho_grid(rho_start::Real, rho_max::Real, n_slices::Integer, spaci
     error("Unknown rho spacing mode: $spacing (expected :linear or :log)")
 end
 
-function build_delta_grid(delta_start::Real, delta_max::Real, n_slices::Integer, spacing::Symbol=:linear)
-    delta_start >= 0 || error("Delta_start cannot be negative")
-    delta_max >= delta_start || error("Delta_max must be greater than or equal to Delta_start")
+function build_delta_grid(delta_start::Real, delta_max::Real, n_slices::Integer, spacing::Symbol=:linear; concentration::Real=4.0)
+    isfinite(delta_start) && isfinite(delta_max) && delta_start >= 0 && delta_max >= 0 ||
+        error("Delta endpoints must be finite and nonnegative")
     n_slices >= 1 || error("n_Delta_slices must be at least one")
 
     if spacing == :linear
+        n_slices == 1 && return [Float64(delta_start)]
         return collect(range(Float64(delta_start), Float64(delta_max); length=n_slices))
     elseif spacing == :log
-        delta_start > 0 || error("Delta_start must be positive for log spacing")
+        delta_start > 0 && delta_max > 0 || error("Delta endpoints must be positive for log spacing")
+        n_slices == 1 && return [Float64(delta_start)]
         return exp.(range(log(Float64(delta_start)), log(Float64(delta_max)); length=n_slices))
+    elseif spacing == :exponential
+        isfinite(concentration) && 0 < concentration <= 700 || error("Delta exponential concentration must be finite and in (0, 700]")
+        n_slices == 1 && return [Float64(delta_start)]
+        lo, hi = minmax(Float64(delta_start), Float64(delta_max))
+        positions = range(delta_start <= delta_max ? 0.0 : 1.0, delta_start <= delta_max ? 1.0 : 0.0; length=n_slices)
+        return [lo + (hi - lo) * expm1(Float64(concentration) * position) / expm1(Float64(concentration)) for position in positions]
     end
-    error("Unknown Delta spacing mode: $spacing (expected :linear or :log)")
+    error("Unknown Delta spacing mode: $spacing (expected :linear, :log, or :exponential)")
 end
 
 function rho_progress(rho::Real, rho_start::Real, rho_max::Real)

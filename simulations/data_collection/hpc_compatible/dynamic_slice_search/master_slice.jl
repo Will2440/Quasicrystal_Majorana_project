@@ -164,9 +164,10 @@ end
 function scan_slice(rho::Float64, slice_index::Int, cfg::Dict{Symbol,Any}, ctx,
                     predictions, total_points::Base.RefValue{Int}, slice_dir::String)
     mu_lo, mu_hi, mu_critical = physical_mu_bounds(rho, cfg, ctx)
-    reference_mu_lo, reference_mu_hi, _ = physical_mu_bounds(Float64(cfg[:rho_start]), cfg, ctx)
+    start_key = SliceSweep.sweep_parameter(cfg) == :rho ? :rho_start : :Delta_start
+    reference_mu_lo, reference_mu_hi, _ = physical_mu_bounds(Float64(cfg[start_key]), cfg, ctx)
     reference_mu_span = reference_mu_hi - reference_mu_lo
-    rho_fraction = SliceSearch.rho_progress(rho, cfg[:rho_start], cfg[:rho_max])
+    rho_fraction = SliceSweep.sweep_progress(rho, cfg)
     baseline_points = SliceSearch.scaled_baseline_point_count(
         mu_hi - mu_lo,
         reference_mu_span,
@@ -389,7 +390,7 @@ function main()
             push!(summary_rows, result)
 
             transition_ids = TransitionTracking.update_tracks!(
-                tracks, result.transitions, result.sweep_value, slice_index, (result.mu_min, result.mu_max), cfg)
+                tracks, result.transitions, result.sweep_value, slice_index, (result.mu_min, result.mu_max), cfg; predictions)
             for (j, transition) in enumerate(result.transitions)
                 push!(transition_rows, (
                     slice_index=slice_index,
@@ -422,7 +423,7 @@ function main()
         while stop_reason == "completed" && !isempty(onset_queue)
             stop_requested(stop_files) && (stop_reason = "stop_requested_during_onset_refinement"; break)
             left, right = popfirst!(onset_queue)
-            right.sweep_value - left.sweep_value <= onset_tol && continue
+            abs(right.sweep_value - left.sweep_value) <= onset_tol && continue
             if extra_slices >= onset_budget
                 pushfirst!(onset_queue, (left, right))
                 break
@@ -457,7 +458,7 @@ function main()
             result.gap_count != left.gap_count && push!(onset_queue, (left, result))
             right.gap_count != result.gap_count && push!(onset_queue, (result, right))
             save_checkpoint(run_root, summary_rows, transition_rows, tracks, total_points[], "onset_refinement", parameter)
-            DynamicIO.logmsg("Onset probe $parameter=$midpoint: gaps=$(result.gap_count), bracket width=$(right.sweep_value-left.sweep_value)")
+            DynamicIO.logmsg("Onset probe $parameter=$midpoint: gaps=$(result.gap_count), bracket width=$(abs(right.sweep_value-left.sweep_value))")
         end
         if !isempty(onset_queue) && stop_reason == "completed"
             stop_reason = "onset_refinement_limit"
