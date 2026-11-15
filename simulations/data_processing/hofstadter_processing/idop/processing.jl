@@ -418,7 +418,8 @@ function apply_outer_normalisation!(
     df::DataFrame, 
     norm_filename::String; 
     target_col::Symbol=:mu_mp, 
-    out_col::Symbol=:mu_mp_norm
+    out_col::Symbol=:mu_mp_norm,
+    verbose_warnings::Bool=true
 )
     """
         apply_outer_normalisation!(df::DataFrame, norm_filename::String; target_col::Symbol=:mu_mp, out_col::Symbol=:mu_mp_norm)
@@ -441,8 +442,26 @@ function apply_outer_normalisation!(
     # Load the normalization parameters from CSV
     norm_df = CSV.read(norm_filename, DataFrame)
     
-    # Define the parameter columns used for matching (adjust if your DataFrames have different columns)
-    param_cols = [:phi, :phason]
+    # Prefer richer matching keys when available in both DataFrames.
+    # This aligns behaviour with the IDOS workflow that saved the CSV.
+    preferred_param_cols = [:phi, :phason, :Delta, :N, :t_n]
+    param_cols = [c for c in preferred_param_cols if (c in propertynames(df) && c in propertynames(norm_df))]
+    isempty(param_cols) && error("No shared parameter columns found between target DataFrame and normalization CSV.")
+
+    # Canonicalise parameter values into stable hash keys so matching is O(1) per row.
+    _canon(v) = begin
+        if ismissing(v)
+            return "__MISSING__"
+        elseif v isa Number
+            # Quantise numeric values to preserve approximate matching tolerance.
+            return string(round(Float64(v); digits=8))
+        elseif v isa AbstractVector || v isa Tuple
+            return string(collect(v))
+        else
+            return string(v)
+        end
+    end
+    _row_key(r, cols) = join((_canon(getproperty(r, c)) for c in cols), "||")
     
     # Ensure required columns exist
     required_cols = [param_cols..., :global_min, :global_max]
@@ -455,28 +474,38 @@ function apply_outer_normalisation!(
     # Initialize the output column (allow Missing in vector elements)
     df[!, out_col] = Vector{Union{Vector{Union{Missing, Float64}}, Missing}}(undef, nrow(df))
 
+    # Build one key->(min,max) map from CSV and collapse duplicate parameter rows once.
+    norm_key_to_bounds = Dict{String, Tuple{Any, Any}}()
+    duplicate_key_count = 0
+    for r in eachrow(norm_df)
+        k = _row_key(r, param_cols)
+        if haskey(norm_key_to_bounds, k)
+            duplicate_key_count += 1
+            continue
+        end
+        norm_key_to_bounds[k] = (r.global_min, r.global_max)
+    end
+    if duplicate_key_count > 0 && verbose_warnings
+        @warn "Normalization CSV contains duplicate parameter rows; using first match per key." duplicate_rows=duplicate_key_count unique_keys=length(norm_key_to_bounds)
+    end
+
+    no_match_count = 0
+
     for (i, row) in enumerate(eachrow(df))
-        # Extract parameter values for matching
-        param_values = NamedTuple(param_cols .=> getproperty.(Ref(row), param_cols))
-        
-        # Find matching row in norm_df
-        matching_rows = filter(r -> all(getproperty(r, col) == param_values[col] for col in param_cols), norm_df)
-        
-        if nrow(matching_rows) == 0
-            @warn "No matching normalization parameters found for row $i with params $param_values. Skipping normalization."
+        k = _row_key(row, param_cols)
+        if !haskey(norm_key_to_bounds, k)
+            no_match_count += 1
             df[i, out_col] = missing
             continue
-        elseif nrow(matching_rows) > 1
-            @warn "Multiple matching normalization parameters found for row $i with params $param_values. Using the first match."
         end
-        
-        # Get min/max from the first match
-        global_min = matching_rows[1, :global_min]
-        global_max = matching_rows[1, :global_max]
+
+        global_min, global_max = norm_key_to_bounds[k]
         
         # Check for missing or invalid min/max
         if ismissing(global_min) || ismissing(global_max) || !isfinite(global_min) || !isfinite(global_max)
-            @warn "Invalid global_min ($global_min) or global_max ($global_max) for row $i. Skipping normalization."
+            if verbose_warnings
+                @warn "Invalid global_min/global_max for row; skipping normalization." row=i global_min=global_min global_max=global_max
+            end
             df[i, out_col] = missing
             continue
         end
@@ -498,7 +527,113 @@ function apply_outer_normalisation!(
         
         df[i, out_col] = normed
     end
+
+    if no_match_count > 0 && verbose_warnings
+        @warn "Rows skipped due to missing normalization match." skipped_rows=no_match_count total_rows=nrow(df)
+    end
     
+    return df
+end
+
+function compute_slope_bandwidth_norm!(
+    df::DataFrame;
+    bandwidth_source_col::Symbol=:eigenvalues,
+    target_col::Symbol=:mu_range,
+    out_col::Symbol=:mu_range_norm,
+    min_out_col::Symbol=:global_min,
+    max_out_col::Symbol=:global_max,
+    fallback_to_target_bandwidth::Bool=true,
+)
+    """
+    Compute per-row bandwidth min/max and normalize `target_col` to [-1, 1].
+
+    Intended for slope-wise normalization in continuous MB workflows.
+    For each row:
+    - bandwidth is computed from `bandwidth_source_col` when available,
+    - otherwise (optionally) from `target_col` when `fallback_to_target_bandwidth=true`.
+
+    Writes three columns:
+    - `min_out_col` : row-wise minimum used for normalization
+    - `max_out_col` : row-wise maximum used for normalization
+    - `out_col`     : normalized target vector in [-1, 1]
+    """
+    if !(target_col in propertynames(df))
+        error("Target column $(target_col) not found in DataFrame")
+    end
+
+    n = nrow(df)
+    mins = Vector{Union{Missing, Float64}}(undef, n)
+    maxs = Vector{Union{Missing, Float64}}(undef, n)
+    normed_col = Vector{Union{Vector{Union{Missing, Float64}}, Missing}}(undef, n)
+
+    _clean_numeric(vec) = begin
+        vals = Float64[]
+        for v in vec
+            if ismissing(v)
+                continue
+            end
+            fv = Float64(v)
+            if isfinite(fv)
+                push!(vals, fv)
+            end
+        end
+        vals
+    end
+
+    for (i, row) in enumerate(eachrow(df))
+        target_vals = getproperty(row, target_col)
+        if ismissing(target_vals) || !(target_vals isa AbstractVector) || isempty(target_vals)
+            mins[i] = missing
+            maxs[i] = missing
+            normed_col[i] = missing
+            continue
+        end
+
+        source_vals = nothing
+        if bandwidth_source_col in propertynames(df)
+            sv = getproperty(row, bandwidth_source_col)
+            if !ismissing(sv) && sv isa AbstractVector && !isempty(sv)
+                source_vals = sv
+            end
+        end
+
+        if source_vals === nothing && fallback_to_target_bandwidth
+            source_vals = target_vals
+        end
+
+        if source_vals === nothing
+            mins[i] = missing
+            maxs[i] = missing
+            normed_col[i] = missing
+            continue
+        end
+
+        source_clean = _clean_numeric(source_vals)
+        if isempty(source_clean)
+            mins[i] = missing
+            maxs[i] = missing
+            normed_col[i] = missing
+            continue
+        end
+
+        gmin = minimum(source_clean)
+        gmax = maximum(source_clean)
+        mins[i] = gmin
+        maxs[i] = gmax
+
+        if gmax == gmin
+            normed_col[i] = [ismissing(x) ? missing : 0.0 for x in target_vals]
+        else
+            normed_col[i] = [
+                ismissing(x) ? missing : (2 * (Float64(x) - gmin) / (gmax - gmin) - 1)
+                for x in target_vals
+            ]
+        end
+    end
+
+    df[!, min_out_col] = mins
+    df[!, max_out_col] = maxs
+    df[!, out_col] = normed_col
     return df
 end
 

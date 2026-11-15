@@ -261,6 +261,164 @@ function plt_discrete_phase_projections(
     # Plots.display(plt)
 end
 
+## plots raw (non-discretised) MP as Majorana's Butterfly, coloured by continuous MP value
+function plt_continuous_phase_projections(
+    df::DataFrame,
+    x_variable::Symbol,      # e.g. :mu_range  — Vector per row (x positions)
+    y_variable::Symbol,      # e.g. :phi        — scalar per row (y positions)
+    color_variable::Symbol,  # e.g. :mp_raw     — Vector per row (continuous colour value)
+    savepath::String;
+    log_colour_scale::Bool=false,
+    final_line_data=nothing,
+    final_poly_data=nothing,
+    plt_xlims::Union{Tuple{Real,Real},Nothing}=nothing,
+    plt_ylims::Union{Tuple{Real,Real},Nothing}=nothing,
+    clims::Tuple{Real,Real}=(-1.0, 0.0),
+    cmap=:viridis,
+    fixed_values...
+)
+    """
+    Plot x_variable vs y_variable coloured by color_variable (continuous MP value).
+
+    - x_variable     : per-row Vector of mu positions (e.g. :mu_range)
+    - y_variable     : per-row scalar (e.g. :phi)
+    - color_variable : per-row Vector of raw MP values aligned with x_variable (e.g. :mp_raw)
+    - clims          : colour axis limits, default (-1.0, 0.0)
+    - fixed_values... filters the DataFrame the same way other plotting helpers do.
+    """
+    # Filter by fixed values
+    _kv_match(row, key, val) = begin
+        rv = getproperty(row, key)
+        (rv isa Number && val isa Number) ? isapprox(rv, val; atol=1e-8, rtol=1e-6) : (rv == val)
+    end
+    _row_matches(row, kvs) = all(_kv_match(row, k, v) for (k,v) in kvs)
+
+    filtered_rows = isempty(fixed_values) ? df : filter(row -> _row_matches(row, fixed_values), df)
+    if isempty(filtered_rows)
+        @warn "No data matches fixed_values for plotting: $fixed_values. Skipping plot."
+        return  # Skip instead of erroring
+    end
+
+    x_points     = Float64[]
+    y_points     = Float64[]
+    color_points = Float64[]
+
+    for row in eachrow(filtered_rows)
+        x_val = nothing
+        y_val = nothing
+        c_val = nothing
+        try
+            x_val = getproperty(row, x_variable)
+            y_val = getproperty(row, y_variable)
+            c_val = getproperty(row, color_variable)
+        catch
+            continue
+        end
+
+        # x_val and c_val are aligned vectors; y_val is a scalar per row
+        if x_val isa AbstractVector && c_val isa AbstractVector && !ismissing(y_val)
+            for i in 1:length(x_val)
+                x_p = x_val[i]
+                c_p = i <= length(c_val) ? c_val[i] : missing
+                if !ismissing(x_p) && !ismissing(c_p)
+                    push!(x_points,     Float64(x_p))
+                    push!(y_points,     Float64(y_val))
+                    push!(color_points, Float64(c_p))
+                end
+            end
+        end
+    end
+
+    println(length(x_points), " points to plot")
+
+    # --- Apply logarithmic colour scale if requested ---
+    if log_colour_scale && !isempty(color_points)
+        # Convert to log scale: add 1 to all values (for data in range -1 to 0)
+        # then take log10 to get range -∞ to 0
+        color_points = log10.(color_points .+ 1)
+        # Filter out -Inf and NaN values that result from the transformation
+        valid_mask = isfinite.(color_points)
+        color_points = color_points[valid_mask]
+        x_points = x_points[valid_mask]
+        y_points = y_points[valid_mask]
+        
+        # Automatically adjust clims to match transformed data range
+        if !isempty(color_points)
+            c_min = minimum(color_points)
+            c_max = maximum(color_points)
+            # Add a small padding to the color limits
+            c_pad = 0.0 * (c_max - c_min)
+            clims = (c_min - c_pad, c_max + c_pad)
+            println("Log colour scale applied. New clims: ", clims)
+        end
+    end
+
+    # --- Plotting ---
+    pad_pc = 0.05
+    if isnothing(plt_xlims)
+        if !isempty(x_points)
+            xmin = minimum(x_points); xmax = maximum(x_points)
+            x_span = xmax - xmin; x_span = x_span == 0 ? 1.0 : x_span
+            xlims = (xmin - pad_pc * x_span, xmax + pad_pc * x_span)
+        else
+            xlims = :auto
+        end
+    else
+        xlims = plt_xlims
+    end
+
+    if isnothing(plt_ylims)
+        if !isempty(y_points)
+            ymin = minimum(y_points); ymax = maximum(y_points)
+            y_span = ymax - ymin; y_span = y_span == 0 ? 1.0 : y_span
+            ylims = (ymin - pad_pc * y_span, ymax + pad_pc * y_span)
+        else
+            ylims = :auto
+        end
+    else
+        ylims = plt_ylims
+    end
+
+    plt = Plots.scatter(
+        x_points, y_points;
+        marker_z=color_points,
+        color=cmap,
+        clims=clims,
+        colorbar=false,
+        markersize=1.0,
+        markerstrokewidth=0,
+        legend=false,
+        xlabel="",
+        ylabel="",
+        grid=false,
+        axes=false,
+        ticks=false,
+        framestyle=:none,
+        size=(5000,5000),
+        xlims=xlims,
+        ylims=ylims,
+        bg=:transparent,
+    )
+
+    # Overlay final regression line if provided
+    if final_line_data !== nothing
+        a, b = final_line_data.a, final_line_data.b
+        phi_line = sort(final_line_data.phi_vals)
+        mu_line = a .* phi_line .+ b
+        Plots.plot!(mu_line, phi_line; color=:red, linewidth=2, label="Final MP regression")
+    end
+
+    if final_poly_data !== nothing
+        p = final_poly_data.poly
+        phi_line = range(minimum(final_poly_data.phi_vals), maximum(final_poly_data.phi_vals), length=200)
+        mu_line = p.(phi_line)
+        Plots.plot!(mu_line, phi_line; color=:red, linewidth=2, label="Final MP poly fit")
+    end
+
+    Plots.savefig(savepath)
+    # Plots.display(plt)
+end
+
 function plt_idop_vs_mu(df::DataFrame, savepath::String; fixed_values...)
     filtered_df = filter(row -> all(getproperty(row, k) == v for (k, v) in fixed_values), df)
     if isempty(filtered_df)

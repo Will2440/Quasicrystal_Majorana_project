@@ -12,23 +12,53 @@ using ProgressMeter
 ###########################################################
 # # Following functions make plots of the raw data, they are designed to be used for any variable name which are the key names of the dataframe
 
-function plt_eigenvalues_generalised(df::DataFrame, x_variable::Symbol; fixed_values...)
+function plt_eigenvalues_generalised(
+    df::DataFrame, x_variable::Symbol;
+    filename::Union{Nothing,String}=nothing,
+    xlims=nothing,
+    ylims=nothing,
+    label_fontsize::Int=24,
+    tick_fontsize::Int=18,
+    plot_mp::Bool=false,
+    mp_yrange::Tuple{Float64,Float64}=(-1.0, 0.0),
+    plot_rho_delta_tracker::Bool=false,
+    tracker_ratio::Union{Nothing,Float64}=nothing,
+    tracker_position::Union{Nothing,Float64}=nothing,
+    tracker_limits::Union{Nothing,Tuple{Float64,Float64}}=nothing,
+    shape_ratio::Float64=0.95,
+    fixed_values...
+)
     """
     Plots eigenvalues as a function of a specified variable from the DataFrame.
 
     Parameters:
     df           -- DataFrame containing the data.
     x_variable   -- Symbol representing the variable to plot on the x-axis.
+    filename     -- Optional output path. If provided, the plot is saved there.
+    ylims        -- Optional tuple for y-axis limits (ymin, ymax). If not provided, auto.
     fixed_values -- Keyword arguments specifying fixed values for all other DataFrame columns.
     """
 
-    plt = Plots.scatter(
-        legend=false, 
-        xlabel=string(x_variable), 
-        ylabel="E", 
-        grid=true,
-        size=(800,600)
+    width = 800
+    height = Int(round(width * shape_ratio))
+    main_plot = Plots.scatter(
+        legend=false,
+        xlabel=L"\mu/t_A",
+        ylabel=L"E",
+        grid=false,
+        size=(width, height),
+        framestyle=:box,
+        xlabelfontsize=label_fontsize,
+        ylabelfontsize=label_fontsize,
+        xtickfontsize=tick_fontsize,
+        ytickfontsize=tick_fontsize
     )
+    if xlims !== nothing
+        Plots.xlims!(main_plot, xlims)
+    end
+    if ylims !== nothing
+        Plots.ylims!(main_plot, ylims)
+    end
 
     filtered_df = filter(row -> all(getproperty(row, key) == value for (key, value) in fixed_values), df)
 
@@ -39,14 +69,93 @@ function plt_eigenvalues_generalised(df::DataFrame, x_variable::Symbol; fixed_va
     x_values = filtered_df[:, x_variable]
     all_eigenvalues = filtered_df[:, :eigenvalues]
 
+    sort_indices = sortperm(x_values)
+    x_values = x_values[sort_indices]
+    all_eigenvalues = all_eigenvalues[sort_indices]
+
     num_eigenvalues = length(all_eigenvalues[1])
 
     for i in 1:num_eigenvalues
         eigenvalue_line = [eigenvalues[i] for eigenvalues in all_eigenvalues]
-        plot!(x_values, eigenvalue_line)
+        plot!(main_plot, x_values, eigenvalue_line, color=:steelblue, alpha=0.8)
     end
 
-    Plots.display(plt)
+    # Plot MP on a secondary y-axis if the raw MP data is available.
+    if plot_mp && (:mp in propertynames(filtered_df))
+        mp_values = [real(mp[floor(Int, length(mp) / 2) + 1]) for mp in filtered_df[:, :mp]]
+        mp_values = mp_values[sort_indices]
+        mp_axis = Plots.twinx(main_plot)
+        plot!(
+            mp_axis,
+            x_values,
+            mp_values,
+            color=:orange,
+            alpha=1.0,
+            linewidth=2,
+            legend=false,
+            ylabel=L"\mathcal{M}",
+            ylims=mp_yrange,
+            ylabelfontsize=label_fontsize,
+            ytickfontsize=tick_fontsize,
+            grid=false,
+            framestyle=:box,
+        )
+        if xlims !== nothing
+            Plots.xlims!(mp_axis, xlims)
+        end
+    end
+
+    full_plot = main_plot
+    if plot_rho_delta_tracker
+        if isnothing(tracker_ratio) || isnothing(tracker_position) || isnothing(tracker_limits)
+            error("tracker_ratio, tracker_position, and tracker_limits must be provided when plot_rho_delta_tracker=true")
+        end
+
+        ratio_min, ratio_max = tracker_limits
+        min_label = string(round(ratio_min; digits=3))
+        max_label = string(round(ratio_max; digits=3))
+
+        tracker_plot = Plots.scatter(
+            [tracker_position],
+            [0.0];
+            legend=false,
+            xlabel=L"\rho/\Delta",
+            ylabel="",
+            color=:orange,
+            markerstrokecolor=:black,
+            markersize=10,
+            grid=false,
+            framestyle=:none,
+            xlims=(0.0, 1.0),
+            ylims=(-0.5, 0.5),
+            xticks=false,
+            yticks=false,
+            xlabelfontsize=label_fontsize,
+            xtickfontsize=tick_fontsize,
+            left_margin=5mm,
+            right_margin=18mm,
+            bottom_margin=5mm,
+            top_margin=0mm,
+        )
+        hline!(tracker_plot, [0.0], color=:black, linewidth=1.5)
+        annotate!(tracker_plot, 0.0, -0.22, text(min_label, tick_fontsize, :black, :left))
+        annotate!(tracker_plot, 1.0, -0.22, text(max_label, tick_fontsize, :black, :right))
+
+        full_plot = plot(
+            main_plot,
+            tracker_plot;
+            layout=@layout([a{0.84h}; b{0.16h}]),
+            size=(width, Int(round(width * (shape_ratio + 0.15)))),
+        )
+    end
+
+    if isnothing(filename)
+        Plots.display(full_plot)
+    else
+        Plots.savefig(full_plot, filename)
+    end
+
+    return full_plot
 end
 
 function plt_mp_generalised(df::DataFrame, x_variable::Symbol, filename::String; fixed_values...)
@@ -401,39 +510,41 @@ end
 ###################### Sec 3: Run #########################
 ###########################################################
 
-filepath = "change/" # have the / at the end!
-mp_tol = 0.1
-df = unpack_bason_standard(filepath; mp_tol=mp_tol)
+if abspath(PROGRAM_FILE) == @__FILE__
+    filepath = "change/" # have the / at the end!
+    mp_tol = 0.1
+    df = unpack_bason_standard(filepath; mp_tol=mp_tol)
 
-N = 50
-seq_name = "GQC"
-
-
-# # One instance
-# # Delta = 1.2
-# plots_savepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/abundance/PQC_N(50-50-1)_t1(1.0-1.0-1)_t2(0.0-15.0-151)_t3(3.0-3.0-1)_mu(0.0-15.0-151)_Delta(0.1-2.0-20)/"
-# # standard_plotting(df, seq_name, mp_tol, filepath; N=N, Delta=Delta)
-# for Delta in collect(range(0.1, 2.0, 20))
-#     standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta, sigma=3.0)
-# end
+    N = 50
+    seq_name = "GQC"
 
 
-# # Instances of all Delta
-# plots_savepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/abundance_data/GQC_N(50-50-1)_t1(1.0-1.0-1_t2(0.0-1000.0-1001)_mu(0.0-3.0-31)_Delta(0.5-0.5-1)/"
-# isdir(plots_savepath) || mkpath(plots_savepath)
+    # # One instance
+    # # Delta = 1.2
+    # plots_savepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/abundance/PQC_N(50-50-1)_t1(1.0-1.0-1)_t2(0.0-15.0-151)_t3(3.0-3.0-1)_mu(0.0-15.0-151)_Delta(0.1-2.0-20)/"
+    # # standard_plotting(df, seq_name, mp_tol, filepath; N=N, Delta=Delta)
+    # for Delta in collect(range(0.1, 2.0, 20))
+    #     standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta, sigma=3.0)
+    # end
 
-# Delta_range = collect(range(0.1, 2.0, 20))
-# for Delta in Delta_range
-#     standard_plotting(df, seq_name, mp_tol, plots_savepath; N=N, Delta=Delta)
-# end
+
+    # # Instances of all Delta
+    # plots_savepath = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/raw_data/np/abundance_data/GQC_N(50-50-1)_t1(1.0-1.0-1_t2(0.0-1000.0-1001)_mu(0.0-3.0-31)_Delta(0.5-0.5-1)/"
+    # isdir(plots_savepath) || mkpath(plots_savepath)
+
+    # Delta_range = collect(range(0.1, 2.0, 20))
+    # for Delta in Delta_range
+    #     standard_plotting(df, seq_name, mp_tol, plots_savepath; N=N, Delta=Delta)
+    # end
 
 
-# Instances of Delta and sigma for PQC
-Delta_range = collect(range(0.0, 2.0, 21))
-sigma_range = [3.0] #[2.0, 3.0, 4.0]
-seq_name = "PQC"
-for sigma in sigma_range
-    for Delta in Delta_range
-        standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta, sigma=sigma)
+    # Instances of Delta and sigma for PQC
+    Delta_range = collect(range(0.0, 2.0, 21))
+    sigma_range = [3.0] #[2.0, 3.0, 4.0]
+    seq_name = "PQC"
+    for sigma in sigma_range
+        for Delta in Delta_range
+            standard_plotting_PQC(df, seq_name, mp_tol, filepath; Delta=Delta, sigma=sigma)
+        end
     end
 end

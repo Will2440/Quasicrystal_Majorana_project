@@ -15,7 +15,8 @@ Dict{Symbol,Any}(
     :phason_tolerance => 1e-4,
     :sequence_selection_mode => :closest,
 
-    :N => 1000,
+    :N => 500,
+    :sweep_parameter => :rho,
     :Delta => 0.05,
     :sweep_mode => :vary_t2,
     :t1_fixed => 1.0,
@@ -24,6 +25,10 @@ Dict{Symbol,Any}(
     :rho_max => 4.5,
     :n_rho_slices => 5,
     :rho_spacing_mode => :linear,
+    :Delta_start => 0.0,
+    :Delta_max => 0.2,
+    :n_Delta_slices => 41,
+    :Delta_spacing_mode => :linear,
     :u_range => (0.0, 1.05),
 
     :x0_alpha => 0.125 / 2,
@@ -71,6 +76,8 @@ Dict{Symbol,Any}(
 
     :rho_onset_tol => 0.01,
     :rho_onset_max_extra_slices => 40,
+    :Delta_onset_tol => 0.001,
+    :Delta_onset_max_extra_slices => 40,
     :max_points_per_slice => 20_000,
     :max_total_points => 500_000,
     :n_eval_workers => 32,

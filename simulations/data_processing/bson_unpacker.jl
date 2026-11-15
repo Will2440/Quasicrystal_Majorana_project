@@ -478,7 +478,7 @@ function unpack_bason_standard(folder_path::String; mp_tol=1e-5)
     df = process_bson_files(folder_path)
     df = calc_norms_df!(df)
     df = calc_mp_disc!(df, mp_tol)
-    df = mask_df!(df)
+    # df = mask_df!(df)
 
     println("DataFrame keynames: $(names(df))")
     return df

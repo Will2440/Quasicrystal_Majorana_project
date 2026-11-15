@@ -49,9 +49,10 @@ include(joinpath(project_root, "../../data_collection/auxilliary/param_comb_gen.
 using .SeqGen
 using .ParamCombGen
 using .LocalSolv: UserOptions
-using BSON: @save, @load
+# using BSON: @save, @load
+using JLD2: @save, @load
 using Plots
-using BSON
+using Dates
 
 
 ###########################################################
@@ -67,26 +68,31 @@ thue_morse_sequence = SeqGen.thue_morse_SeqGen(N_seq_seed)
 plastic_sequence = SeqGen.plastic_SeqGen(N_seq_seed)
 
 ## Recover Sturmian sequences from .bson
-seq_file = "hof_style_slopes_N1000_target_0.61803_tol_0.001_phason_0.0-101-1.0_nbins1000_npb1.bson"
-indir = joinpath(project_root, "..", "auxilliary", "sturm_seq_sets", seq_file)
+
+## all slopes
+# seq_file = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/data_collection/auxilliary/local_mp_seq_sets/slopes_N1000_phason_0.61803-1-0.61803_nbins100_npb1_mapto(2, 1).bson"
+
+## only fibonacci
+seq_file = "/Users/Will/Documents/Quasicrystal_Majorana_project_clone/Quasicrystal_Majorana_project/simulations/data_collection/auxilliary/local_mp_seq_sets/slopes_N10000_literal_0.61803_phason_0.61803-1-0.61803_mapto(2, 1).bson"
+indir = joinpath(project_root, "..", "auxilliary", "local_mp_seq_sets", seq_file)
 indir = normpath(indir)
 sturm_df = SeqGen.load_sturmian_seq_bson(indir)
 
 ## N Range (even single value must be a Vector type)
-N_range = [110]
+N_range = [200] #collect(round.(Int, logrange(100, 3000, length=10))) # [200]
 
 ## t_n Range (combine any number of different hopping ranges)
 t1_range = collect(range(1.0, 1.0, 1))
-t2_range = collect(range(1.5, 1.5, 1))
+t2_range = collect(range(1.0, 10.0, 11))
 t3_range = [2.0, 3.0, 4.0]
 t_ranges = [t1_range, t2_range]#, t3_range]
 t_combinations = ParamCombGen.t_ranges_combs(t_ranges)
 
-## mu Range (even single calue must be a Vector type)
-mu_range = collect(range(0.0, 3.0, length=301))
+## mu Range (even single value must be a Vector type)
+mu_range = collect(range(0.0, 4.5, length=201))
 
 ## Delta Range (even single value must be a vector type)
-Delta_range = [0.05]#, 0.1, 0.2] #collect(range(0.1, 2.0, 20))
+Delta_range = [0.05] #collect(range(0.01, 1.0, 101))
 
 
 ## Sequence Chunking (use this to generate sequence samples which can be compared)
@@ -98,40 +104,62 @@ Delta_range = [0.05]#, 0.1, 0.2] #collect(range(0.1, 2.0, 20))
 # end
 
 
-## Sequence Definition (choose which standard hopping sequence to use)
-# sequences = [plastic_sequence]
-# sequence_name = "PQC"
+# # Sequence Definition (choose which standard hopping sequence to use)
+# sequences = [golden_sequence]
+# sequence_name = "GQC"
+# sequence_ids = [(2/(1 + sqrt(5)), 0.0)]
 
 raw_seqs = collect(sturm_df.seq)
 sequences = [Vector{Int}(s) for s in raw_seqs]
-sequence_name = String(seq_file[1:end-5])  # remove .bson
+# sequence_name = String(seq_file[1:end-5])  # remove .bson
+sequence_name = String(split(seq_file, '/')[end][1:end-5])
 # raw_seq_ids = collect(sturm_df.phi)
 # sequence_ids = [Float64(id) for id in raw_seq_ids]
 phis = collect(sturm_df.phi)
 phasons = collect(sturm_df.phason)
 sequence_ids = [(phi, phason) for (phi, phason) in zip(phis, phasons)]
+# println("Sequence ids (phi, phason): ", sequence_ids)
 
 
 ## Set Precision for hp calculations
-BigFloat_precision = 512
+BigFloat_precision = 128
 
 
 ## Set chunk size for data saving
 chunk_size = 1000
 
+## Set eta and omega_range for spectral function calculation
+eta = 0.1
+omega_range = collect(-3.0:0.1:3.0)
+
+
+###########################################################
+############ Sec 6: Spectral Localiser Terms ##############
+###########################################################
+
+# mid_x0s = [Float64(maximum(N_range)/2)]
+# x0s = mid_x0s # [mid_x0]
+
+alpha = 0.125
+N = N_range[1]
+x0s = collect(range(N/2 - alpha * N, N/2 + alpha * N, length=10))
+# x0s=[N/2]
+
+
+kappas =  collect(logrange(1e-5, 1e-1, length=10)) # collect(range(1e-4, 5e-2, length=25))
 
 
 ###########################################################
 ################## Sec 2: Data Save Path ##################
 ###########################################################
 
-project_name = "sturm_range_full" #"sturmian_sweep_t1-t2_const_mapping"
+project_name = "spec_loc_qc-sc_comp" #"local_mp_data"
 
 root_path = joinpath(project_root, "../../../simulations/raw_data")
 if length(t_ranges) < 3
-    folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range)))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+    folder_name = "$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range)))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))_kappa($(kappas[1])-$(kappas[end])-$(length(kappas)))_x0s($(x0s[1])-$(x0s[end])-$(length(x0s)))/"
 else
-    folder_name = "np/$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range)))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_t3($(t3_range[1])-$(t3_range[end])-$(length(t3_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))/"
+    folder_name = "$project_name/$(sequence_name)_N($(N_range[1])-$(N_range[end])-$(length(N_range)))_t1($(t1_range[1])-$(t1_range[end])-$(length(t1_range)))_t2($(t2_range[1])-$(t2_range[end])-$(length(t2_range)))_t3($(t3_range[1])-$(t3_range[end])-$(length(t3_range)))_mu($(mu_range[1])-$(mu_range[end])-$(length(mu_range)))_Delta($(Delta_range[1])-$(Delta_range[end])-$(length(Delta_range)))_kappa($(kappas[1])-$(kappas[end])-$(length(kappas)))_x0s($(x0s[1])-$(x0s[end])-$(length(x0s)))/"
 end
 datasave_path = "$(root_path)/$(folder_name)/"
 
@@ -152,11 +180,14 @@ function get_user_options()
         false,   # calc_ipr
         false,   # calc_mbs_energy_gap
         false,   # calc_loc_len
-        true,    # calc_proj_wind
+        false,    # calc_proj_wind
+        false,   # calc_spectral_func
+        eta,     # eta for spectral function calculation
+        omega_range, # omega range for spectral function calculation
         :np,     # calc_precision: :hp, :np
         :none, # save_evecs: :all_np, :all_hp, :maj_np, :maj_hp, :none
         :all_np, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :none
-        :phason_loop # solver_type: :generic, seq_scaled, :mu_loop, :N_loop, :restricted, :phason_loop
+        :spec_loc # solver_type: :generic, seq_scaled, :mu_loop, :N_loop, :restricted, :phason_loop, :spec_loc
     )
 end
 
@@ -166,10 +197,11 @@ end
 ###########################################################
 
 # This is specific to a 2-phopping system, adjust as needed for other cases
-rho_min = minimum(t2_range) / maximum(t1_range)
-rho_max = maximum(t2_range) / minimum(t1_range)
-rho_step = (rho_max - rho_min) / length(t2_range)
-rho_range = collect(range(rho_min, rho_max, length(t2_range)))
+# rho_min = minimum(t2_range) / maximum(t1_range)
+# rho_max = maximum(t2_range) / minimum(t1_range)
+# rho_step = (rho_max - rho_min) / length(t2_range)
+# rho_range = collect(range(rho_min, rho_max, length(t2_range)))
+rho_range = collect(range(1.0, 10.0, 10))
 
 xs = mu_range
 ys = rho_range
@@ -198,35 +230,35 @@ cuts = [
 mu_rho_restricted = ParamCombGen.restrict_range(xs, ys, cuts)
 
 
-## Function to check the output of cuts before proceeding with simulation
-function plot_mu_rho_restricted(mu_range, rho_range, mu_rho_restricted)
+# ## Function to check the output of cuts before proceeding with simulation
+# function plot_mu_rho_restricted(mu_range, rho_range, mu_rho_restricted)
 
-    restricted_set = Set(mu_rho_restricted)
+#     restricted_set = Set(mu_rho_restricted)
 
-    all_points = [(mu, rho) for mu in mu_range, rho in rho_range]
+#     all_points = [(mu, rho) for mu in mu_range, rho in rho_range]
 
-    restricted_x = Float64[]
-    restricted_y = Float64[]
-    unrestricted_x = Float64[]
-    unrestricted_y = Float64[]
-    for (mu, rho) in all_points
-        if (mu, rho) in restricted_set
-            push!(restricted_x, mu)
-            push!(restricted_y, rho)
-        else
-            push!(unrestricted_x, mu)
-            push!(unrestricted_y, rho)
-        end
-    end
+#     restricted_x = Float64[]
+#     restricted_y = Float64[]
+#     unrestricted_x = Float64[]
+#     unrestricted_y = Float64[]
+#     for (mu, rho) in all_points
+#         if (mu, rho) in restricted_set
+#             push!(restricted_x, mu)
+#             push!(restricted_y, rho)
+#         else
+#             push!(unrestricted_x, mu)
+#             push!(unrestricted_y, rho)
+#         end
+#     end
 
-    plt = scatter(unrestricted_x, unrestricted_y, color=:gray, label="Unrestricted", legend=:topright)
-    scatter!(restricted_x, restricted_y, color=:red, label="Restricted")
-    xlabel!("mu")
-    ylabel!("rho")
-    title!("mu-rho restricted points")
+#     plt = scatter(unrestricted_x, unrestricted_y, color=:gray, label="Unrestricted", legend=:topright)
+#     scatter!(restricted_x, restricted_y, color=:red, label="Restricted")
+#     xlabel!("mu")
+#     ylabel!("rho")
+#     title!("mu-rho restricted points")
 
-    savefig(plt, "sample_cuts.png")
-end
+#     savefig(plt, "sample_cuts.png")
+# end
 
 # plot_mu_rho_restricted(mu_range, rho_range, mu_rho_restricted)
 
@@ -243,12 +275,14 @@ tbar = 1.5         # target t_1 value when preserve_symbol = :t1
 
 
 ###########################################################
-####################### Sec 6: Run ########################
+####################### Sec 7: Run ########################
 ###########################################################
 
 # ------------------------------
 # --------- Single run ---------
 opts = get_user_options()
+start_time = now()
+
 run_selected_solver(
     opts, 
     N_range, 
@@ -264,8 +298,14 @@ run_selected_solver(
     sequence_ids=sequence_ids,
     rho_target=rho_target,
     tbar=tbar,
-    preserve_symbol=preserve_symbol
+    preserve_symbol=preserve_symbol,
+    x0s=x0s,
+    kappas=kappas
 )
+
+end_time = now()
+elapsed = end_time - start_time
+println("Simulation completed in $(Dates.value(elapsed)/1000) seconds ($(elapsed))")
 
 
 # # ------------------------------------------------------------------------------

@@ -14,6 +14,7 @@ include(joinpath(project_root, "core", "tracking.jl"))
 include(joinpath(project_root, "core", "physics.jl"))
 include(joinpath(project_root, "core", "sequences.jl"))
 include(joinpath(project_root, "core", "bandwidth.jl"))
+include(joinpath(project_root, "core", "sweep.jl"))
 include(joinpath(project_root, "core", "io_utils.jl"))
 
 using .SliceSearch
@@ -21,6 +22,7 @@ using .TransitionTracking
 using .DynamicPhysics
 using .DynamicSequences
 using .DynamicBandwidth
+using .SliceSweep
 using .DynamicIO
 
 struct PointBudgetExceeded <: Exception
@@ -50,10 +52,10 @@ function make_eval_context(cfg::Dict{Symbol,Any})
     N = Int(cfg[:N])
     return (
         N=N,
-        Delta=Float64(cfg[:Delta]),
         sequence=sequence,
         gamma=gamma,
         phason=phason,
+        fixed_mu_critical=SliceSweep.fixed_mu_critical(cfg, gamma),
         x0s=build_x0s(N, Float64(cfg[:x0_alpha]), Int(cfg[:x0_count])),
         kappas=Vector{Float64}(cfg[:kappas]),
         n_lowest_evals=Int(cfg[:n_lowest_evals]),
@@ -68,29 +70,18 @@ function point_key(rho::Float64, mu::Float64)
     return @sprintf("%.12g|%.12g", rho, mu)
 end
 
-function physical_mu_bounds(rho::Float64, cfg::Dict{Symbol,Any}, ctx)
-    t1, t2 = DynamicBandwidth.tpair_from_rho(
-        rho;
-        sweep_mode=cfg[:sweep_mode],
-        t1_fixed=cfg[:t1_fixed],
-        t2_fixed=cfg[:t2_fixed],
-    )
-    mu_critical = DynamicBandwidth.mu_critical_estimate(ctx.gamma, t1, t2)
+function physical_mu_bounds(value::Float64, cfg::Dict{Symbol,Any}, ctx)
+    params = SliceSweep.physical_parameters(value, cfg, ctx.gamma, ctx.fixed_mu_critical)
+    mu_critical = params.mu_critical
     u_lo, u_hi = cfg[:u_range]
     return (Float64(u_lo * mu_critical), Float64(u_hi * mu_critical), Float64(mu_critical))
 end
 
-function evaluate_point(rho::Float64, mu::Float64, cfg::Dict{Symbol,Any}, ctx)
-    t1, t2 = DynamicBandwidth.tpair_from_rho(
-        rho;
-        sweep_mode=cfg[:sweep_mode],
-        t1_fixed=cfg[:t1_fixed],
-        t2_fixed=cfg[:t2_fixed],
-    )
-    mu_critical = DynamicBandwidth.mu_critical_estimate(ctx.gamma, t1, t2)
-    u = mu / mu_critical
+function evaluate_point(value::Float64, mu::Float64, cfg::Dict{Symbol,Any}, ctx)
+    params = SliceSweep.physical_parameters(value, cfg, ctx.gamma, ctx.fixed_mu_critical)
+    u = mu / params.mu_critical
     result = DynamicPhysics.evaluate_specloc_point(
-        ctx.N, [t1, t2], mu, ctx.Delta, ctx.sequence, ctx.x0s, ctx.kappas;
+        ctx.N, [params.t1, params.t2], mu, params.Delta, ctx.sequence, ctx.x0s, ctx.kappas;
         n_lowest_evals=ctx.n_lowest_evals,
         kk_tol=ctx.kk_tol,
         kk_maxiter=ctx.kk_maxiter,
@@ -98,7 +89,9 @@ function evaluate_point(rho::Float64, mu::Float64, cfg::Dict{Symbol,Any}, ctx)
         topological_fraction=ctx.topological_fraction,
     )
     return (
-        point_key=point_key(rho, mu), rho=rho, mu=mu, u=u, t1=t1, t2=t2,
+        point_key=point_key(value, mu), sweep_parameter=String(SliceSweep.sweep_parameter(cfg)),
+        sweep_value=value, rho=params.rho, Delta=params.Delta,
+        mu=mu, u=u, t1=params.t1, t2=params.t2,
         phase_label=result.phase_label, topo_fraction=result.topo_fraction,
         invariant_mean=result.invariant_mean, invariant_min=result.invariant_min,
         invariant_max=result.invariant_max, gap_min=result.gap_min,
@@ -127,7 +120,7 @@ function evaluate_mus_parallel(rho::Float64, mus, cfg::Dict{Symbol,Any}, ctx)
                 completed = Threads.atomic_add!(done, 1) + 1
                 if completed % log_every == 0 || completed == n
                     elapsed = time() - t0
-                    DynamicIO.logmsg("rho=$rho evaluation $completed/$n, rate=$(round(completed / max(elapsed, 1e-9), digits=2)) points/s")
+                    DynamicIO.logmsg("$(SliceSweep.sweep_parameter(cfg))=$rho evaluation $completed/$n, rate=$(round(completed / max(elapsed, 1e-9), digits=2)) points/s")
                 end
             end
         end
@@ -157,7 +150,7 @@ function evaluate_mu_cached!(cache::Dict{String,NamedTuple}, rho::Float64, mu::F
     key = point_key(rho, mu)
     haskey(cache, key) && return cache[key]
     if length(cache) >= Int(cfg[:max_points_per_slice])
-        throw(PointBudgetExceeded("Reached max_points_per_slice=$(cfg[:max_points_per_slice]) at rho=$rho"))
+        throw(PointBudgetExceeded("Reached max_points_per_slice=$(cfg[:max_points_per_slice]) at $(SliceSweep.sweep_parameter(cfg))=$rho"))
     end
     if total_points[] >= Int(cfg[:max_total_points])
         throw(PointBudgetExceeded("Reached max_total_points=$(cfg[:max_total_points])"))
@@ -216,9 +209,9 @@ function scan_slice(rho::Float64, slice_index::Int, cfg::Dict{Symbol,Any}, ctx,
     sort!(candidate_mus)
     unique!(candidate_mus)
     length(candidate_mus) <= Int(cfg[:max_points_per_slice]) ||
-        throw(PointBudgetExceeded("Initial candidates exceed max_points_per_slice at rho=$rho"))
+        throw(PointBudgetExceeded("Initial candidates exceed max_points_per_slice at $(SliceSweep.sweep_parameter(cfg))=$rho"))
     length(candidate_mus) + total_points[] <= Int(cfg[:max_total_points]) ||
-        throw(PointBudgetExceeded("Initial candidates exceed max_total_points at rho=$rho"))
+        throw(PointBudgetExceeded("Initial candidates exceed max_total_points at $(SliceSweep.sweep_parameter(cfg))=$rho"))
 
     started = time()
     rows = evaluate_mus_parallel(rho, candidate_mus, cfg, ctx)
@@ -250,9 +243,13 @@ function scan_slice(rho::Float64, slice_index::Int, cfg::Dict{Symbol,Any}, ctx,
     CSV.write(joinpath(slice_dir, "point_results.csv"), DataFrame(samples))
     CSV.write(joinpath(slice_dir, "predictions.csv"), DataFrame(prediction_rows))
 
+    params = SliceSweep.physical_parameters(rho, cfg, ctx.gamma, ctx.fixed_mu_critical)
     return (
         slice_index=slice_index,
-        rho=rho,
+        sweep_parameter=String(SliceSweep.sweep_parameter(cfg)),
+        sweep_value=rho,
+        rho=params.rho,
+        Delta=params.Delta,
         gap_count=gap_count,
         transitions=refined_transitions,
         samples=samples,
@@ -266,13 +263,15 @@ function scan_slice(rho::Float64, slice_index::Int, cfg::Dict{Symbol,Any}, ctx,
         eval_seconds=time() - started,
         mu_min=mu_lo,
         mu_max=mu_hi,
+        mu_critical=mu_critical,
         slice_dir=slice_dir,
     )
 end
 
 function write_summary(summary_rows, transition_rows, run_root::String)
     summary_df = DataFrame(
-        slice_index=Int[], rho=Float64[], gap_count=Int[], n_transitions=Int[],
+        slice_index=Int[], rho=Float64[], Delta=Float64[], sweep_value=Float64[], sweep_parameter=String[],
+        mu_min=Float64[], mu_max=Float64[], mu_critical=Float64[], gap_count=Int[], n_transitions=Int[],
         n_points=Int[], n_baseline=Int[], n_prediction_points=Int[],
         baseline_mu_spacing=Float64[], n_predicted_edges=Int[],
         boundary_points_per_prediction=Int[], n_gap_refinement_points=Int[],
@@ -280,7 +279,8 @@ function write_summary(summary_rows, transition_rows, run_root::String)
     )
     for row in summary_rows
         push!(summary_df, (
-            row.slice_index, row.rho, row.gap_count, length(row.transitions),
+            row.slice_index, row.rho, row.Delta, row.sweep_value, row.sweep_parameter,
+            row.mu_min, row.mu_max, row.mu_critical, row.gap_count, length(row.transitions),
             row.n_points, row.n_baseline, row.n_prediction_points,
             row.baseline_mu_spacing, row.n_predicted_edges,
             row.boundary_points_per_prediction, row.n_gap_refinement_points,
@@ -290,7 +290,7 @@ function write_summary(summary_rows, transition_rows, run_root::String)
     CSV.write(joinpath(run_root, "slice_summary.csv"), summary_df)
 
     transition_df = DataFrame(
-        slice_index=Int[], rho=Float64[], track_id=Int[], transition_index=Int[],
+        slice_index=Int[], rho=Float64[], Delta=Float64[], sweep_value=Float64[], sweep_parameter=String[], track_id=Int[], transition_index=Int[],
         mu=Float64[], mu_lo=Float64[], mu_hi=Float64[], phase_lo=Int[],
         phase_hi=Int[], gap_min=Float64[], refinement_iters=Int[], converged=Bool[],
     )
@@ -301,14 +301,15 @@ function write_summary(summary_rows, transition_rows, run_root::String)
     return summary_df, transition_df
 end
 
-function save_checkpoint(run_root, summary_rows, transition_rows, tracks, total_points, stop_reason)
+function save_checkpoint(run_root, summary_rows, transition_rows, tracks, total_points, stop_reason, parameter)
     summary_df, transition_df = write_summary(summary_rows, transition_rows, run_root)
     DynamicIO.write_jld2(
         joinpath(run_root, "run_checkpoint.jld2");
         timestamp=string(Dates.now()),
         stop_reason=stop_reason,
         total_points=total_points,
-        completed_slices=[r.rho for r in summary_rows],
+        sweep_parameter=parameter,
+        completed_slices=[r.sweep_value for r in summary_rows],
         gap_counts=[r.gap_count for r in summary_rows],
         summary_columns=Dict(String(n) => summary_df[!, n] for n in names(summary_df)),
         transition_columns=Dict(String(n) => transition_df[!, n] for n in names(transition_df)),
@@ -316,18 +317,15 @@ function save_checkpoint(run_root, summary_rows, transition_rows, tracks, total_
     )
 end
 
-function onset_brackets(summary_rows, rho_tol::Float64)
-    ordered = sort(collect(summary_rows); by=s -> s.rho)
+function onset_brackets(summary_rows, tolerance::Float64, parameter::Symbol)
+    ordered = sort(collect(summary_rows); by=s -> s.sweep_value)
     brackets = NamedTuple[]
     for i in 1:(length(ordered) - 1)
         left, right = ordered[i], ordered[i + 1]
-        if left.gap_count != right.gap_count && right.rho - left.rho <= rho_tol
-            push!(brackets, (
-                rho_lo=left.rho,
-                rho_hi=right.rho,
-                gap_count_lo=left.gap_count,
-                gap_count_hi=right.gap_count,
-            ))
+        if left.gap_count != right.gap_count && right.sweep_value - left.sweep_value <= tolerance
+            names = (Symbol("$(parameter)_lo"), Symbol("$(parameter)_hi"), :gap_count_lo, :gap_count_hi)
+            push!(brackets, NamedTuple{names}((left.sweep_value, right.sweep_value,
+                                               left.gap_count, right.gap_count)))
         end
     end
     return brackets
@@ -337,12 +335,13 @@ function validate_config(cfg::Dict{Symbol,Any})
     cfg[:mu_baseline_points] >= 3 || error("mu_baseline_points must be at least 3")
     cfg[:transition_mu_tol] > 0 || error("transition_mu_tol must be positive")
     cfg[:gap_refine_max_depth] >= 0 || error("gap_refine_max_depth cannot be negative")
-    cfg[:rho_onset_tol] > 0 || error("rho_onset_tol must be positive")
-    cfg[:discovery_rho_growth_factor] >= 1 || error("discovery_rho_growth_factor must be at least one")
-    cfg[:mu_refine_points_per_prediction_max] >= cfg[:mu_refine_points_per_prediction] ||
-        error("mu_refine_points_per_prediction_max must be at least the starting point count")
-    0 <= cfg[:prediction_band_min_fraction] <= cfg[:prediction_band_max_fraction] ||
-        error("Prediction band fractions must satisfy 0 <= min <= max")
+    parameter = SliceSweep.sweep_parameter(cfg)
+    SliceSweep.sweep_grid(cfg)
+    tolerance_key = parameter == :rho ? :rho_onset_tol : :Delta_onset_tol
+    budget_key = parameter == :rho ? :rho_onset_max_extra_slices : :Delta_onset_max_extra_slices
+    cfg[tolerance_key] > 0 || error("$tolerance_key must be positive")
+    cfg[budget_key] >= 0 || error("$budget_key cannot be negative")
+    parameter == :Delta && SliceSweep.fixed_mu_critical(cfg, Float64(cfg[:target_slope]))
     return cfg
 end
 
@@ -363,8 +362,11 @@ function main()
 
     ctx = make_eval_context(cfg)
     DynamicIO.logmsg("Selected sequence slope/phason: $(ctx.gamma), $(ctx.phason)")
-    rho_values = SliceSearch.build_rho_grid(
-        cfg[:rho_start], cfg[:rho_max], cfg[:n_rho_slices], cfg[:rho_spacing_mode])
+    parameter = SliceSweep.sweep_parameter(cfg)
+    sweep_values = SliceSweep.sweep_grid(cfg)
+    onset_tol = Float64(cfg[parameter == :rho ? :rho_onset_tol : :Delta_onset_tol])
+    onset_budget = Int(cfg[parameter == :rho ? :rho_onset_max_extra_slices : :Delta_onset_max_extra_slices])
+    parameter == :Delta && DynamicIO.logmsg("Fixed mu_c estimate: $(ctx.fixed_mu_critical)")
     tracks = EdgeTrack[]
     summary_rows = NamedTuple[]
     transition_rows = NamedTuple[]
@@ -374,7 +376,7 @@ function main()
     onset_queue = Tuple{NamedTuple,NamedTuple}[]
 
     try
-        for (grid_index, rho) in enumerate(rho_values)
+        for (grid_index, rho) in enumerate(sweep_values)
             if stop_requested(stop_files)
                 stop_reason = "stop_requested"
                 break
@@ -387,12 +389,14 @@ function main()
             push!(summary_rows, result)
 
             transition_ids = TransitionTracking.update_tracks!(
-                tracks, result.transitions, result.rho, slice_index, (result.mu_min, result.mu_max), cfg;
-                predictions=predictions)
+                tracks, result.transitions, result.sweep_value, slice_index, (result.mu_min, result.mu_max), cfg)
             for (j, transition) in enumerate(result.transitions)
                 push!(transition_rows, (
                     slice_index=slice_index,
                     rho=result.rho,
+                    Delta=result.Delta,
+                    sweep_value=result.sweep_value,
+                    sweep_parameter=result.sweep_parameter,
                     track_id=transition_ids[j],
                     transition_index=j,
                     mu=transition.mu,
@@ -410,17 +414,21 @@ function main()
                 previous = summary_rows[end - 1]
                 result.gap_count != previous.gap_count && push!(onset_queue, (previous, result))
             end
-            save_checkpoint(run_root, summary_rows, transition_rows, tracks, total_points[], "in_progress")
-            DynamicIO.logmsg("Slice $(grid_index)/$(length(rho_values)): rho=$rho gaps=$(result.gap_count), transitions=$(length(result.transitions)), points=$(result.n_points), total=$total_points[]")
+            save_checkpoint(run_root, summary_rows, transition_rows, tracks, total_points[], "in_progress", parameter)
+            DynamicIO.logmsg("Slice $(grid_index)/$(length(sweep_values)): $parameter=$rho gaps=$(result.gap_count), transitions=$(length(result.transitions)), points=$(result.n_points), total=$(total_points[])")
         end
 
         extra_slices = 0
-        while !isempty(onset_queue) && extra_slices < Int(cfg[:rho_onset_max_extra_slices])
+        while stop_reason == "completed" && !isempty(onset_queue)
             stop_requested(stop_files) && (stop_reason = "stop_requested_during_onset_refinement"; break)
             left, right = popfirst!(onset_queue)
-            right.rho - left.rho <= Float64(cfg[:rho_onset_tol]) && continue
+            right.sweep_value - left.sweep_value <= onset_tol && continue
+            if extra_slices >= onset_budget
+                pushfirst!(onset_queue, (left, right))
+                break
+            end
 
-            midpoint = 0.5 * (left.rho + right.rho)
+            midpoint = 0.5 * (left.sweep_value + right.sweep_value)
             slice_index += 1
             slice_dir = DynamicIO.ensure_dir(joinpath(run_root, "slices", "slice_$(lpad(slice_index, 4, '0'))"))
             result = scan_slice(midpoint, slice_index, cfg, ctx, NamedTuple[], total_points, slice_dir)
@@ -429,6 +437,9 @@ function main()
                 push!(transition_rows, (
                     slice_index=slice_index,
                     rho=result.rho,
+                    Delta=result.Delta,
+                    sweep_value=result.sweep_value,
+                    sweep_parameter=result.sweep_parameter,
                     track_id=0,
                     transition_index=j,
                     mu=transition.mu,
@@ -445,8 +456,8 @@ function main()
 
             result.gap_count != left.gap_count && push!(onset_queue, (left, result))
             right.gap_count != result.gap_count && push!(onset_queue, (result, right))
-            save_checkpoint(run_root, summary_rows, transition_rows, tracks, total_points[], "onset_refinement")
-            DynamicIO.logmsg("Onset probe rho=$midpoint: gaps=$(result.gap_count), bracket width=$(right.rho-left.rho)")
+            save_checkpoint(run_root, summary_rows, transition_rows, tracks, total_points[], "onset_refinement", parameter)
+            DynamicIO.logmsg("Onset probe $parameter=$midpoint: gaps=$(result.gap_count), bracket width=$(right.sweep_value-left.sweep_value)")
         end
         if !isempty(onset_queue) && stop_reason == "completed"
             stop_reason = "onset_refinement_limit"
@@ -463,10 +474,11 @@ function main()
         end
     end
 
-    save_checkpoint(run_root, summary_rows, transition_rows, tracks, total_points[], stop_reason)
-    brackets = onset_brackets(summary_rows, Float64(cfg[:rho_onset_tol]))
+    save_checkpoint(run_root, summary_rows, transition_rows, tracks, total_points[], stop_reason, parameter)
+    brackets = onset_brackets(summary_rows, onset_tol, parameter)
     onset_df = DataFrame(
-        rho_lo=Float64[], rho_hi=Float64[], gap_count_lo=Int[], gap_count_hi=Int[])
+        Symbol("$(parameter)_lo") => Float64[], Symbol("$(parameter)_hi") => Float64[],
+        :gap_count_lo => Int[], :gap_count_hi => Int[])
     for bracket in brackets
         push!(onset_df, bracket)
     end
@@ -480,8 +492,12 @@ function main()
         total_points=total_points[],
         slices_completed=length(summary_rows),
         onset_brackets=brackets,
-        rho_values=sort([r.rho for r in summary_rows]),
-        gap_counts=[r.gap_count for r in sort(summary_rows; by=s -> s.rho)],
+        sweep_parameter=parameter,
+        sweep_values=sort([r.sweep_value for r in summary_rows]),
+        rho_values=[r.rho for r in sort(summary_rows; by=s -> s.sweep_value)],
+        Delta_values=[r.Delta for r in sort(summary_rows; by=s -> s.sweep_value)],
+        fixed_mu_critical=ctx.fixed_mu_critical,
+        gap_counts=[r.gap_count for r in sort(summary_rows; by=s -> s.sweep_value)],
         julia_threads=Threads.nthreads(),
         blas_threads=BLAS.get_num_threads(),
     )

@@ -9,6 +9,7 @@ include(joinpath(project_root, "../../data_collection/auxilliary/param_comb_gen.
 using .LocalSolv
 using .SeqGen
 using .ParamCombGen
-using BSON: @save, @load
+# using BSON: @save, @load
+using JLD2: @save, @load
 
 print("local_machine environment initialised. Proceed to local_machine/main.jl to set parameters and run simulations.\n")
