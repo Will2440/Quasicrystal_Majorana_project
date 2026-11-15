@@ -15,9 +15,27 @@ sample(mu, phase; gap=0.1) = (mu=Float64(mu), phase_label=Int(phase), gap_min=Fl
     logarithmic = SliceSearch.build_rho_grid(1.0, 9.0, 3, :log)
     @test logarithmic ≈ [1.0, 3.0, 9.0]
     @test_throws ErrorException SliceSearch.build_rho_grid(0.0, 3.0, 5, :log)
+    @test SliceSearch.build_delta_grid(0.0, 0.2, 3, :linear) ≈ [0.0, 0.1, 0.2]
+    @test SliceSearch.build_delta_grid(0.01, 1.0, 3, :log) ≈ [0.01, 0.1, 1.0]
+    @test_throws ErrorException SliceSearch.build_delta_grid(0.0, 1.0, 3, :log)
+    @test_throws ErrorException SliceSearch.build_delta_grid(-0.1, 1.0, 3, :linear)
+    @test SliceSearch.rho_progress(1.0, 1.0, 3.0) == 0.0
+    @test SliceSearch.rho_progress(2.0, 1.0, 3.0) == 0.5
+    @test SliceSearch.rho_progress(4.0, 1.0, 3.0) == 1.0
 
     grid = SliceSearch.baseline_mu_grid(-1.0, 1.0, 5)
     @test grid ≈ [-1.0, -0.5, 0.0, 0.5, 1.0]
+    @test SliceSearch.scaled_baseline_point_count(2.0, 2.0, 201) == 201
+    @test SliceSearch.scaled_baseline_point_count(4.0, 2.0, 201) == 401
+    @test SliceSearch.scaled_baseline_point_count(2.5, 2.0, 201) == 251
+    @test SliceSearch.scaled_baseline_point_count(
+        4.0, 2.0, 201; rho_fraction=0.0, rho_growth_factor=1.25, rho_growth_power=2.0) == 401
+    @test SliceSearch.scaled_baseline_point_count(
+        4.0, 2.0, 201; rho_fraction=1.0, rho_growth_factor=1.25, rho_growth_power=2.0) == 501
+    @test SliceSearch.boundary_points_per_prediction(9, 25, 0.0, 1.5) == 9
+    @test SliceSearch.boundary_points_per_prediction(9, 25, 1.0, 1.5) == 25
+    @test 9 < SliceSearch.boundary_points_per_prediction(9, 25, 0.5, 1.5) < 25
+    @test_throws ErrorException SliceSearch.scaled_baseline_point_count(2.0, 0.0, 201)
 
     samples = [sample(-1, 0), sample(0, 1), sample(1, 0), sample(2, 0), sample(3, 1)]
     transitions = SliceSearch.detect_transitions(samples)
@@ -42,33 +60,104 @@ end
 
 @testset "Conservative transition tracking" begin
     cfg = Dict{Symbol,Any}(
-        :mu_min => 0.0,
-        :mu_max => 10.0,
         :momentum_min_history => 3,
         :momentum_damping => 0.2,
         :momentum_max_shift_fraction => 0.02,
-        :prediction_band_half_width_fraction => 0.03,
-        :track_match_max_fraction => 0.5,
+        :prediction_band_min_fraction => 0.03,
+        :prediction_band_max_fraction => 0.08,
+        :prediction_band_motion_multiplier => 2.5,
+        :prediction_band_curvature_multiplier => 1.5,
+        :track_match_base_tolerance_fraction => 0.01,
+        :track_match_max_tolerance_fraction => 0.05,
+        :track_match_step_scale => 1.5,
+        :track_unmatched_penalty => 0.75,
         :track_max_missed_slices => 1,
         :momentum_enabled => true,
     )
     tracks = TransitionTracking.EdgeTrack[]
-    transition(mu) = (mu=mu, phase_lo=0, phase_hi=1)
+    transition(mu, phase_lo=0, phase_hi=1) = (mu=mu, phase_lo=phase_lo, phase_hi=phase_hi)
 
     ids1 = TransitionTracking.update_tracks!(tracks, [transition(2.0)], 1.0, 1, (0.0, 10.0), cfg)
-    ids2 = TransitionTracking.update_tracks!(tracks, [transition(2.5)], 1.1, 2, (0.0, 10.0), cfg)
+    predictions = TransitionTracking.predict_edges(tracks, 1.1, 2, (0.0, 10.0), cfg)
+    ids2 = TransitionTracking.update_tracks!(tracks, [transition(2.05)], 1.1, 2, (0.0, 10.0), cfg; predictions)
     @test ids1 == ids2
 
     # Before three observed positions, prediction stays at the latest position.
     pred = TransitionTracking.predict_edges(tracks, 1.2, 3, (0.0, 10.0), cfg)
-    @test pred[1].mu == 2.5
+    @test pred[1].mu == 2.05
+    @test pred[1].band_half_width == 0.3
 
-    TransitionTracking.update_tracks!(tracks, [transition(3.0)], 1.2, 3, (0.0, 10.0), cfg)
+    TransitionTracking.update_tracks!(tracks, [transition(2.1)], 1.2, 3, (0.0, 10.0), cfg; predictions=pred)
     pred = TransitionTracking.predict_edges(tracks, 1.3, 4, (0.0, 10.0), cfg)
     @test length(pred) == 1
-    @test 3.0 < pred[1].mu <= 3.2
+    @test 2.1 < pred[1].mu <= 2.12
 
     cfg[:momentum_enabled] = false
     no_momentum = TransitionTracking.predict_edges(tracks, 1.4, 4, (0.0, 10.0), cfg)
-    @test no_momentum[1].mu == 3.0
+    @test no_momentum[1].mu == 2.1
+end
+
+@testset "Motion-informed prediction bands" begin
+    cfg = Dict{Symbol,Any}(
+        :momentum_min_history => 3,
+        :momentum_damping => 0.2,
+        :momentum_max_shift_fraction => 0.02,
+        :prediction_band_min_fraction => 0.03,
+        :prediction_band_max_fraction => 0.08,
+        :prediction_band_motion_multiplier => 2.5,
+        :prediction_band_curvature_multiplier => 1.5,
+        :track_max_missed_slices => 1,
+        :momentum_enabled => true,
+    )
+    track = TransitionTracking.EdgeTrack(
+        1,
+        (0, 1),
+        [(rho=1.0, mu=1.0), (rho=1.1, mu=1.1), (rho=1.2, mu=1.2), (rho=1.3, mu=1.3)],
+        4,
+    )
+    prediction = only(TransitionTracking.predict_edges([track], 1.4, 5, (0.0, 10.0), cfg))
+    @test prediction.mu ≈ 1.32
+    @test prediction.predicted_motion ≈ 0.1
+    @test prediction.band_half_width ≈ 0.3
+    @test prediction.curvature_uncertainty ≈ 0.0
+end
+
+@testset "Ordered matching protects established boundaries" begin
+    cfg = Dict{Symbol,Any}(
+        :momentum_min_history => 3,
+        :momentum_damping => 0.2,
+        :momentum_max_shift_fraction => 0.02,
+        :prediction_band_min_fraction => 0.03,
+        :prediction_band_max_fraction => 0.08,
+        :prediction_band_motion_multiplier => 2.5,
+        :prediction_band_curvature_multiplier => 1.5,
+        :track_match_base_tolerance_fraction => 0.01,
+        :track_match_max_tolerance_fraction => 0.05,
+        :track_match_step_scale => 1.5,
+        :track_unmatched_penalty => 0.75,
+        :track_max_missed_slices => 1,
+        :momentum_enabled => true,
+    )
+    tracks = TransitionTracking.EdgeTrack[]
+    rising(mu) = (mu=mu, phase_lo=0, phase_hi=1)
+    falling(mu) = (mu=mu, phase_lo=1, phase_hi=0)
+
+    TransitionTracking.update_tracks!(tracks, [rising(2.0), falling(8.0)], 1.0, 1, (0.0, 10.0), cfg)
+    TransitionTracking.update_tracks!(tracks, [rising(2.05), falling(8.05)], 1.1, 2, (0.0, 10.0), cfg)
+    predictions = TransitionTracking.predict_edges(tracks, 1.2, 3, (0.0, 10.0), cfg)
+    ids = TransitionTracking.update_tracks!(
+        tracks,
+        [rising(6.5), falling(8.1)],
+        1.2,
+        3,
+        (0.0, 10.0),
+        cfg;
+        predictions,
+    )
+
+    @test ids[2] == 2
+    @test ids[1] != 2
+    @test tracks[2].history[end].mu == 8.1
+    @test tracks[2].history[end].rho == 1.2
+    @test tracks[1].last_seen == 2
 end

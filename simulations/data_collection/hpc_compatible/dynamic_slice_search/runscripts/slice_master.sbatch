@@ -3,8 +3,8 @@
 #SBATCH --output=logs/slice_master_%j.out
 #SBATCH --error=logs/slice_master_%j.err
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=24
-#SBATCH --time=01:00:00
+#SBATCH --cpus-per-task=28
+#SBATCH --time=05:00:00
 #SBATCH --mem=64G
 
 set -euo pipefail

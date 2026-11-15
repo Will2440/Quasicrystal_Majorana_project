@@ -171,14 +171,31 @@ end
 function scan_slice(rho::Float64, slice_index::Int, cfg::Dict{Symbol,Any}, ctx,
                     predictions, total_points::Base.RefValue{Int}, slice_dir::String)
     mu_lo, mu_hi, mu_critical = physical_mu_bounds(rho, cfg, ctx)
+    reference_mu_lo, reference_mu_hi, _ = physical_mu_bounds(Float64(cfg[:rho_start]), cfg, ctx)
+    reference_mu_span = reference_mu_hi - reference_mu_lo
+    rho_fraction = SliceSearch.rho_progress(rho, cfg[:rho_start], cfg[:rho_max])
+    baseline_points = SliceSearch.scaled_baseline_point_count(
+        mu_hi - mu_lo,
+        reference_mu_span,
+        Int(cfg[:mu_baseline_points]);
+        rho_fraction=rho_fraction,
+        rho_growth_factor=Float64(get(cfg, :discovery_rho_growth_factor, 1.0)),
+        rho_growth_power=Float64(get(cfg, :discovery_rho_growth_power, 1.0)),
+    )
     cache = Dict{String,NamedTuple}()
-    baseline = SliceSearch.baseline_mu_grid(mu_lo, mu_hi, Int(cfg[:mu_baseline_points]))
+    baseline = SliceSearch.baseline_mu_grid(mu_lo, mu_hi, baseline_points)
     candidate_mus = copy(baseline)
     prediction_rows = NamedTuple[]
-    band_half_width = Float64(get(cfg, :prediction_band_half_width_fraction, 0.03)) * (mu_hi - mu_lo)
-    n_prediction_points = max(3, Int(get(cfg, :mu_refine_points_per_prediction, 9)))
+    n_prediction_points = SliceSearch.boundary_points_per_prediction(
+        Int(get(cfg, :mu_refine_points_per_prediction, 9)),
+        Int(get(cfg, :mu_refine_points_per_prediction_max, 41)),
+        rho_fraction,
+        Float64(get(cfg, :boundary_resolution_growth_power, 1.5)),
+    )
 
     for prediction in predictions
+        band_half_width = Float64(get(prediction, :band_half_width,
+            Float64(get(cfg, :prediction_band_min_fraction, 0.03)) * (mu_hi - mu_lo)))
         band_lo = max(mu_lo, prediction.mu - band_half_width)
         band_hi = min(mu_hi, prediction.mu + band_half_width)
         append!(candidate_mus, range(band_lo, band_hi; length=n_prediction_points))
@@ -187,6 +204,10 @@ function scan_slice(rho::Float64, slice_index::Int, cfg::Dict{Symbol,Any}, ctx,
             predicted_mu=prediction.mu,
             band_lo=band_lo,
             band_hi=band_hi,
+            band_half_width=band_half_width,
+            predicted_motion=Float64(get(prediction, :predicted_motion, 0.0)),
+            curvature_uncertainty=Float64(get(prediction, :curvature_uncertainty, 0.0)),
+            n_band_points=n_prediction_points,
             orientation_lo=prediction.orientation[1],
             orientation_hi=prediction.orientation[2],
         ))
@@ -237,6 +258,9 @@ function scan_slice(rho::Float64, slice_index::Int, cfg::Dict{Symbol,Any}, ctx,
         samples=samples,
         n_points=length(cache),
         n_baseline=length(baseline),
+        baseline_mu_spacing=(mu_hi - mu_lo) / max(length(baseline) - 1, 1),
+        n_predicted_edges=length(predictions),
+        boundary_points_per_prediction=n_prediction_points,
         n_prediction_points=length(candidate_mus) - length(baseline),
         n_gap_refinement_points=length(added_gap_samples),
         eval_seconds=time() - started,
@@ -250,13 +274,17 @@ function write_summary(summary_rows, transition_rows, run_root::String)
     summary_df = DataFrame(
         slice_index=Int[], rho=Float64[], gap_count=Int[], n_transitions=Int[],
         n_points=Int[], n_baseline=Int[], n_prediction_points=Int[],
-        n_gap_refinement_points=Int[], eval_seconds=Float64[],
+        baseline_mu_spacing=Float64[], n_predicted_edges=Int[],
+        boundary_points_per_prediction=Int[], n_gap_refinement_points=Int[],
+        eval_seconds=Float64[],
     )
     for row in summary_rows
         push!(summary_df, (
             row.slice_index, row.rho, row.gap_count, length(row.transitions),
             row.n_points, row.n_baseline, row.n_prediction_points,
-            row.n_gap_refinement_points, row.eval_seconds,
+            row.baseline_mu_spacing, row.n_predicted_edges,
+            row.boundary_points_per_prediction, row.n_gap_refinement_points,
+            row.eval_seconds,
         ))
     end
     CSV.write(joinpath(run_root, "slice_summary.csv"), summary_df)
@@ -310,6 +338,11 @@ function validate_config(cfg::Dict{Symbol,Any})
     cfg[:transition_mu_tol] > 0 || error("transition_mu_tol must be positive")
     cfg[:gap_refine_max_depth] >= 0 || error("gap_refine_max_depth cannot be negative")
     cfg[:rho_onset_tol] > 0 || error("rho_onset_tol must be positive")
+    cfg[:discovery_rho_growth_factor] >= 1 || error("discovery_rho_growth_factor must be at least one")
+    cfg[:mu_refine_points_per_prediction_max] >= cfg[:mu_refine_points_per_prediction] ||
+        error("mu_refine_points_per_prediction_max must be at least the starting point count")
+    0 <= cfg[:prediction_band_min_fraction] <= cfg[:prediction_band_max_fraction] ||
+        error("Prediction band fractions must satisfy 0 <= min <= max")
     return cfg
 end
 
@@ -354,7 +387,8 @@ function main()
             push!(summary_rows, result)
 
             transition_ids = TransitionTracking.update_tracks!(
-                tracks, result.transitions, result.rho, slice_index, (result.mu_min, result.mu_max), cfg)
+                tracks, result.transitions, result.rho, slice_index, (result.mu_min, result.mu_max), cfg;
+                predictions=predictions)
             for (j, transition) in enumerate(result.transitions)
                 push!(transition_rows, (
                     slice_index=slice_index,
