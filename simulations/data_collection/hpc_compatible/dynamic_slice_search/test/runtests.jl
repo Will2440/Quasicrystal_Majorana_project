@@ -11,6 +11,62 @@ using .TransitionTracking
 
 sample(mu, phase; gap=0.1) = (mu=Float64(mu), phase_label=Int(phase), gap_min=Float64(gap))
 
+@testset "Kappa modes" begin
+    cfg = Dict{Symbol,Any}(:N => 500, :kappas => [1e-4, 2e-4])
+    @test SliceSweep.kappas_for_delta(cfg, 0.1) == [1e-4, 2e-4]
+    cfg[:kappa_mode] = :delta_over_L
+    @test SliceSweep.kappas_for_delta(cfg, 1.0) == [0.002]
+    @test SliceSweep.kappas_for_delta(cfg, 0.001) == [2e-6]
+    @test SliceSweep.kappas_for_delta(cfg, 0.0) == [0.0]
+    @test_throws ErrorException SliceSweep.kappas_for_delta(cfg, -0.1)
+    cfg[:N] = 0
+    @test_throws ErrorException SliceSweep.kappas_for_delta(cfg, 0.1)
+    cfg[:kappa_mode] = :user_defined
+    cfg[:kappas] = Float64[]
+    @test_throws ErrorException SliceSweep.kappas_for_delta(cfg, 0.1)
+    cfg[:kappas] = [NaN]
+    @test_throws ErrorException SliceSweep.kappas_for_delta(cfg, 0.1)
+    cfg[:kappa_mode] = :unknown
+    @test_throws ErrorException SliceSweep.kappas_for_delta(cfg, 0.1)
+end
+
+module DynamicPhysics
+const received_kappas = Ref{Vector{Float64}}()
+function evaluate_specloc_point(N, hoppings, mu, delta, sequence, x0s, kappas; kwargs...)
+    received_kappas[] = kappas
+    return (phase_label=1, topo_fraction=1.0, invariant_mean=1.0, invariant_min=1.0,
+            invariant_max=1.0, gap_min=0.1, gap_mean=0.1, gap_max=0.1, n_samples=length(kappas))
+end
+end
+
+point_key(value::Float64, mu::Float64) = string(value, "|", mu)
+master_code = Meta.parseall(read(joinpath(@__DIR__, "..", "master_slice.jl"), String))
+point_function = only(filter(expression -> expression isa Expr && expression.head == :function &&
+    expression.args[1] isa Expr && expression.args[1].args[1] == :evaluate_point, master_code.args))
+Core.eval(Main, point_function)
+
+@testset "Kappas passed to point evaluation" begin
+    cfg = Dict{Symbol,Any}(:sweep_parameter => :Delta, :t1_fixed => 1.0, :t2_fixed => 1.5,
+        :N => 500, :kappa_mode => :delta_over_L, :kappas => [0.01, 0.02])
+    ctx = (N=500, gamma=0.5, fixed_mu_critical=2.5, sequence=[1], x0s=[1.0],
+        n_lowest_evals=2, kk_tol=1e-8, kk_maxiter=10, topological_threshold=0.5, topological_fraction=0.5)
+    point = evaluate_point(0.1, 0.4, cfg, ctx)
+    @test DynamicPhysics.received_kappas[] == [0.0002]
+    @test point.kappa_mode == "delta_over_L" && parse(Float64, point.kappa_values) == 0.0002
+    point = evaluate_point(0.0, 0.4, cfg, ctx)
+    @test DynamicPhysics.received_kappas[] == [0.0]
+    cfg[:kappa_mode] = :user_defined
+    point = evaluate_point(0.1, 0.4, cfg, ctx)
+    @test DynamicPhysics.received_kappas[] == [0.01, 0.02]
+    @test point.kappa_values == "0.01;0.02" && point.n_samples == 2
+    cfg[:sweep_parameter] = :rho
+    cfg[:sweep_mode] = :vary_t2
+    cfg[:Delta] = 0.05
+    cfg[:kappa_mode] = :delta_over_L
+    evaluate_point(1.5, 0.4, cfg, ctx)
+    @test DynamicPhysics.received_kappas[] == [0.0001]
+end
+
 @testset "Sweep parameters" begin
     cfg = Dict{Symbol,Any}(
         :sweep_mode => :vary_t2, :t1_fixed => 1.0, :t2_fixed => 1.5,

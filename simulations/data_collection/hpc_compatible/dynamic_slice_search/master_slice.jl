@@ -57,7 +57,6 @@ function make_eval_context(cfg::Dict{Symbol,Any})
         phason=phason,
         fixed_mu_critical=SliceSweep.fixed_mu_critical(cfg, gamma),
         x0s=build_x0s(N, Float64(cfg[:x0_alpha]), Int(cfg[:x0_count])),
-        kappas=Vector{Float64}(cfg[:kappas]),
         n_lowest_evals=Int(cfg[:n_lowest_evals]),
         kk_tol=Float64(cfg[:kk_tol]),
         kk_maxiter=Int(cfg[:kk_maxiter]),
@@ -80,8 +79,9 @@ end
 function evaluate_point(value::Float64, mu::Float64, cfg::Dict{Symbol,Any}, ctx)
     params = SliceSweep.physical_parameters(value, cfg, ctx.gamma, ctx.fixed_mu_critical)
     u = mu / params.mu_critical
+    kappas = SliceSweep.kappas_for_delta(cfg, params.Delta)
     result = DynamicPhysics.evaluate_specloc_point(
-        ctx.N, [params.t1, params.t2], mu, params.Delta, ctx.sequence, ctx.x0s, ctx.kappas;
+        ctx.N, [params.t1, params.t2], mu, params.Delta, ctx.sequence, ctx.x0s, kappas;
         n_lowest_evals=ctx.n_lowest_evals,
         kk_tol=ctx.kk_tol,
         kk_maxiter=ctx.kk_maxiter,
@@ -92,6 +92,7 @@ function evaluate_point(value::Float64, mu::Float64, cfg::Dict{Symbol,Any}, ctx)
         point_key=point_key(value, mu), sweep_parameter=String(SliceSweep.sweep_parameter(cfg)),
         sweep_value=value, rho=params.rho, Delta=params.Delta,
         mu=mu, u=u, t1=params.t1, t2=params.t2,
+        kappa_mode=String(get(cfg, :kappa_mode, :user_defined)), kappa_values=join(kappas, ";"),
         phase_label=result.phase_label, topo_fraction=result.topo_fraction,
         invariant_mean=result.invariant_mean, invariant_min=result.invariant_min,
         invariant_max=result.invariant_max, gap_min=result.gap_min,
@@ -251,6 +252,8 @@ function scan_slice(rho::Float64, slice_index::Int, cfg::Dict{Symbol,Any}, ctx,
         sweep_value=rho,
         rho=params.rho,
         Delta=params.Delta,
+        kappa_mode=String(get(cfg, :kappa_mode, :user_defined)),
+        kappa_values=join(SliceSweep.kappas_for_delta(cfg, params.Delta), ";"),
         gap_count=gap_count,
         transitions=refined_transitions,
         samples=samples,
@@ -271,7 +274,7 @@ end
 
 function write_summary(summary_rows, transition_rows, run_root::String)
     summary_df = DataFrame(
-        slice_index=Int[], rho=Float64[], Delta=Float64[], sweep_value=Float64[], sweep_parameter=String[],
+        slice_index=Int[], rho=Float64[], Delta=Float64[], sweep_value=Float64[], sweep_parameter=String[], kappa_mode=String[], kappa_values=String[],
         mu_min=Float64[], mu_max=Float64[], mu_critical=Float64[], gap_count=Int[], n_transitions=Int[],
         n_points=Int[], n_baseline=Int[], n_prediction_points=Int[],
         baseline_mu_spacing=Float64[], n_predicted_edges=Int[],
@@ -280,7 +283,7 @@ function write_summary(summary_rows, transition_rows, run_root::String)
     )
     for row in summary_rows
         push!(summary_df, (
-            row.slice_index, row.rho, row.Delta, row.sweep_value, row.sweep_parameter,
+            row.slice_index, row.rho, row.Delta, row.sweep_value, row.sweep_parameter, row.kappa_mode, row.kappa_values,
             row.mu_min, row.mu_max, row.mu_critical, row.gap_count, length(row.transitions),
             row.n_points, row.n_baseline, row.n_prediction_points,
             row.baseline_mu_spacing, row.n_predicted_edges,
@@ -337,7 +340,9 @@ function validate_config(cfg::Dict{Symbol,Any})
     cfg[:transition_mu_tol] > 0 || error("transition_mu_tol must be positive")
     cfg[:gap_refine_max_depth] >= 0 || error("gap_refine_max_depth cannot be negative")
     parameter = SliceSweep.sweep_parameter(cfg)
-    SliceSweep.sweep_grid(cfg)
+    values = SliceSweep.sweep_grid(cfg)
+    delta = parameter == :Delta ? first(values) : cfg[:Delta]
+    SliceSweep.kappas_for_delta(cfg, delta)
     tolerance_key = parameter == :rho ? :rho_onset_tol : :Delta_onset_tol
     budget_key = parameter == :rho ? :rho_onset_max_extra_slices : :Delta_onset_max_extra_slices
     cfg[tolerance_key] > 0 || error("$tolerance_key must be positive")

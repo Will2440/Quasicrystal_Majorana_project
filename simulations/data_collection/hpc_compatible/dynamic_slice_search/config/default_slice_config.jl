@@ -26,15 +26,16 @@ Dict{Symbol,Any}(
     :n_rho_slices => 5,
     :rho_spacing_mode => :linear,
     :Delta_start => 1.0,
-    :Delta_max => 0.0,
-    :n_Delta_slices => 41,
+    :Delta_max => 0.001,
+    :n_Delta_slices => 21,
     :Delta_spacing_mode => :exponential,
     :Delta_exponential_concentration => 4.0,
     :u_range => (0.0, 1.05),
 
     :x0_alpha => 0.125 / 2,
     :x0_count => 5,
-    :kappas => [1e-6],
+    :kappa_mode => :delta_over_L,   # :user_defined, :delta_over_L
+    :kappas => [2.5e-4],
     :n_lowest_evals => 4,
     :kk_tol => 1e-8,
     :kk_maxiter => 300,
@@ -43,7 +44,7 @@ Dict{Symbol,Any}(
 
     # Sparse full-range discovery scan: preserve physical-mu spacing and add
     # only modest extra density toward the sweep endpoint. Narrower features may be missed.
-    :mu_baseline_points => 701,
+    :mu_baseline_points => 501,
     :discovery_rho_growth_factor => 2.0,
     :discovery_rho_growth_power => 1.0,
 

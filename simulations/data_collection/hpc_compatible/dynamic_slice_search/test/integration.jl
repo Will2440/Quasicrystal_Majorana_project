@@ -11,7 +11,7 @@ include(joinpath(@__DIR__, "..", "merge_slice_runs.jl"))
 end
 
 @testset "Real localizer smoke test" begin
-    cfg = Dict{Symbol,Any}(:sweep_parameter => :Delta, :t1_fixed => 1.0, :t2_fixed => 1.5)
+    cfg = Dict{Symbol,Any}(:sweep_parameter => :Delta, :t1_fixed => 1.0, :t2_fixed => 1.5, :kappas => [0.01])
     ctx = (N=6, gamma=0.5, fixed_mu_critical=SliceSweep.fixed_mu_critical(cfg, 0.5),
            sequence=[1, 2, 1, 2, 1, 2], x0s=[3.0], kappas=[0.01],
            n_lowest_evals=2, kk_tol=1e-8, kk_maxiter=100,
@@ -43,7 +43,7 @@ end
             :output_root => directory, :run_root_pointer_file => joinpath(directory, "latest.txt"),
             :global_stop_file => joinpath(directory, "stop"), :t1_fixed => 1.0, :t2_fixed => 1.5,
             :Delta_start => 0.2, :Delta_max => 0.0, :n_Delta_slices => 2,
-            :Delta_spacing_mode => :linear,
+            :Delta_spacing_mode => :linear, :kappa_mode => :delta_over_L,
             :Delta_onset_tol => 0.026, :Delta_onset_max_extra_slices => 10,
             :rho_start => 1.0, :rho_max => 2.0, :n_rho_slices => 2,
             :mu_baseline_points => 9, :gap_refine_max_depth => 0, :transition_mu_tol => 0.02,
@@ -76,6 +76,9 @@ end
                 if parameter == :Delta
                     @test all(==(1.5), summary.rho)
                     @test summary.Delta[1:2] ≈ [0.2, 0.0]
+                    @test all(==("delta_over_L"), summary.kappa_mode)
+                    @test parse.(Float64, string.(summary.kappa_values)) ≈ summary.Delta ./ cfg[:N]
+                    @test all(==(0.05), points.kappa_values)
                     @test summary.n_baseline[1:2] == [9, 17]
                     @test all(summary.Delta .== summary.sweep_value)
                     @test length(unique(summary.mu_critical)) == 1

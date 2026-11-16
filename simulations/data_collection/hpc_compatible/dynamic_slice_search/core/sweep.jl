@@ -3,9 +3,25 @@ module SliceSweep
 using ..DynamicBandwidth
 using ..SliceSearch
 
-export sweep_parameter, sweep_grid, sweep_progress, fixed_mu_critical, physical_parameters
+export sweep_parameter, sweep_grid, sweep_progress, fixed_mu_critical, physical_parameters, kappas_for_delta
 
 sweep_parameter(cfg) = get(cfg, :sweep_parameter, :rho)
+
+function kappas_for_delta(cfg, delta::Real)
+    mode = get(cfg, :kappa_mode, :user_defined)
+    if mode == :user_defined
+        values = Float64.(collect(cfg[:kappas]))
+        !isempty(values) && all(value -> isfinite(value) && value >= 0, values) ||
+            error("kappas must be a nonempty collection of finite nonnegative values")
+        return values
+    elseif mode == :delta_over_L
+        length_sites = cfg[:N]
+        length_sites isa Integer && length_sites > 0 || error("N must be a positive integer for kappa_mode=:delta_over_L")
+        isfinite(delta) && delta >= 0 || error("Delta must be finite and nonnegative for kappa_mode=:delta_over_L")
+        return [Float64(delta) / length_sites]
+    end
+    error("Unknown kappa_mode: $mode (expected :user_defined or :delta_over_L)")
+end
 
 function sweep_grid(cfg)
     parameter = sweep_parameter(cfg)

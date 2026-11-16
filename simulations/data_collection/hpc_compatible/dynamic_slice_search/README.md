@@ -28,6 +28,8 @@ Edit `config/default_slice_config.jl` for the default run or pass another config
 - `Delta_start`, `Delta_max`, `n_Delta_slices`, `Delta_spacing_mode`: inclusive Delta sweep in either direction. Despite its historical name, `Delta_max` is the final endpoint, not necessarily the maximum. `:linear` permits zero; `:log` requires both endpoints to be positive. `:exponential` permits zero and concentrates slices near the smaller endpoint.
 - `Delta_exponential_concentration`: positive exponent controlling `:exponential` spacing (default 4.0). For endpoints 1 and 0, the grid is `expm1(c * x) / expm1(c)` with `x` evenly spaced from 1 down to 0. Larger values concentrate more slices near zero; this is a sampling choice, not a guarantee of resolving an exponential gap density.
 - `u_range`: normalized mu range. In rho mode physical bounds are recalculated at each rho; in Delta mode they are calculated once for the selected sequence slope and fixed hoppings and reused on every slice.
+- `kappa_mode`: `:user_defined` evaluates every entry in `kappas` at every `x0`; `:delta_over_L` uses one value `Delta / N`, where `N` is the number of chain sites (unit lattice spacing). Older configs without this setting use `:user_defined`. In rho sweeps, Delta is fixed, so `:delta_over_L` gives the same kappa on every slice. Onset probes use their own Delta.
+- `kappas`: a nonempty collection of finite, nonnegative values for `:user_defined`; for example, `collect(range(1e-5, 1e-4; length=5))`. Every kappa and position contributes to the same phase vote and summary statistics, not independent kappa-resolved runs. The list is ignored in `:delta_over_L` mode.
 - `mu_baseline_points`: full-range discovery samples on every slice.
 - `transition_mu_tol`: stopping width for each observed transition bracket in physical mu.
 - `gap_refine_tol`, `gap_refine_mu_tol`, `gap_refine_max_depth`: bounded refinement for adjacent samples with small localizer gaps.
@@ -44,18 +46,21 @@ Edit `config/default_slice_config.jl` for the default run or pass another config
 
 All hopping, sequence-selection, localizer, and disorder-free physical parameters are also in the config. Transition tracks are evaluated in physical mu; stored rows include both `mu` and `u`.
 
-The default config sweeps Delta from 1 to 0 with rho fixed at 1.5:
+The default config sweeps Delta from 1 to 0.001 with rho fixed at 1.5 and uses Delta-dependent kappa:
 
 ```julia
 :sweep_parameter => :Delta,
 :t1_fixed => 1.0,
 :t2_fixed => 1.5,
 :Delta_start => 1.0,
-:Delta_max => 0.0,
-:n_Delta_slices => 41,
+:Delta_max => 0.001,
+:n_Delta_slices => 21,
 :Delta_spacing_mode => :exponential,
 :Delta_exponential_concentration => 4.0,
+:kappa_mode => :delta_over_L,
 ```
+
+At `Delta = 0`, `:delta_over_L` gives `kappa = 0`, so the localizer's position-dependent term vanishes and it may become singular. Treat the zero endpoint with care; choose a positive endpoint or a user-defined positive kappa if a nonzero position term is required. There is no automatic kappa floor.
 
 The fixed estimate is `mu_c = 2 * ((1 - gamma) * t1 + gamma * t2)`, where `gamma` is the slope of the selected sequence. This is a bandwidth-based estimate, not a numerically measured critical point or a guarantee that every Delta-dependent transition lies inside the chosen `u_range`. Check the physical bounds and expand `u_range` or run convergence checks when needed.
 
@@ -75,7 +80,7 @@ The job uses Julia 1.10.3, instantiates this standalone project, and runs all sl
 
 Each run is written under `runs/dynamic_mb_slice_search_<timestamp>/`:
 
-- `slice_summary.csv`: gap count, transition count, sample counts, timing, physical mu bounds, and mu-critical estimate for each slice.
+- `slice_summary.csv`: gap count, transition count, sample counts, timing, physical mu bounds, mu-critical estimate, and kappa mode and values for each slice.
 - `transition_boundaries.csv`: transition positions and mu brackets, with track IDs for the initial sweep.
 - `onset_brackets.csv`: sampled intervals where the gap count changes and the bracket meets the configured tolerance; columns are `rho_lo`/`rho_hi` or `Delta_lo`/`Delta_hi`.
 - `slices/slice_NNNN/point_results.csv`: all localizer results for that slice.
@@ -84,6 +89,8 @@ Each run is written under `runs/dynamic_mb_slice_search_<timestamp>/`:
 - `STOP_REQUESTED`: create this file inside the run directory to stop before the next slice.
 
 The summary, transition, and point tables contain `sweep_parameter`, `sweep_value`, `rho`, and `Delta`. `rho` always means the physical hopping ratio, even in a Delta sweep; use `Delta` or `sweep_value` for its horizontal axis. The JLD2 metadata also records the sweep parameter and values. The scripts in `simulations/data_processing/boundary_processing/slice_boundary_processing` select the plotting axis from the sweep parameter and support legacy rho-only runs.
+
+The summary and point tables record `kappa_mode` and `kappa_values`. Multiple kappa values are stored in one semicolon-separated field in the same order as the config; numerical results are aggregated across them and `x0` positions.
 
 ## Merge rho ranges
 
