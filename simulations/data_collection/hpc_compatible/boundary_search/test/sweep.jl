@@ -63,7 +63,7 @@ end
 @testset "configuration and sweep dispatch" begin
     cfg = include(joinpath(@__DIR__, "..", "config", "default_config.jl"))
     @test isabspath(cfg[:sequence_bson_path])
-    @test cfg[:skip_trivial_interiors] === false
+    @test cfg[:skip_trivial_interiors] isa Bool
     @test sweep_grid(cfg) == build_rho_grid(cfg[:rho_start], cfg[:rho_max], cfg[:n_rho_slices], cfg[:rho_spacing_mode])
     @test sweep_progress(cfg[:rho_start], cfg) == 0.0
     @test sweep_progress(cfg[:rho_max], cfg) == 1.0

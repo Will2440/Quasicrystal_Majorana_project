@@ -1,6 +1,14 @@
 module BoundaryCoverage
 
-export plan_grid
+export plan_grid, baseline_point_count
+
+function baseline_point_count(bounds, count::Integer, mu_critical::Real, max_mu_spacing)
+    max_mu_spacing === nothing && return count
+    isfinite(max_mu_spacing) && max_mu_spacing > 0 || error("mu_baseline_spacing_max must be finite and positive")
+    isfinite(mu_critical) && mu_critical > 0 || error("mu_critical must be finite and positive")
+    span = Float64(bounds[2] - bounds[1]) * Float64(mu_critical)
+    return max(count, ceil(Int, span / max_mu_spacing) + 1)
+end
 
 function plan_grid(bounds, count::Integer, exclusions, audit_count::Integer)
     lo, hi = Float64.(bounds)
@@ -18,7 +26,6 @@ function plan_grid(bounds, count::Integer, exclusions, audit_count::Integer)
             push!(merged, (left, right))
         end
     end
-    lengths = Float64[]
     regions = Tuple{Float64,Float64}[]
     cursor = lo
     for (left, right) in merged
@@ -26,7 +33,7 @@ function plan_grid(bounds, count::Integer, exclusions, audit_count::Integer)
         cursor = right
     end
     cursor < hi && push!(regions, (cursor, hi))
-    append!(lengths, [right - left for (left, right) in regions])
+    lengths = [right - left for (left, right) in regions]
     total = sum(lengths)
     points = Float64[lo, hi]
     if total > 0

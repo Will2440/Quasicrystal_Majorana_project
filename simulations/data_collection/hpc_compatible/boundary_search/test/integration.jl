@@ -12,7 +12,8 @@ function fixture(directory)
         :N => 6, :output_root => directory, :run_root_pointer_file => joinpath(directory, "latest.txt"),
         :global_stop_file => joinpath(directory, "stop"), :run_name => "integration",
         :u_range => (0.0, 1.0), :u_baseline_points => 41, :transition_u_tol => 0.002,
-        :rho_start => 1.1, :rho_max => 1.5, :n_rho_slices => 3,
+        :sweep_parameter => :rho, :skip_trivial_interiors => false,
+        :rho_start => 1.1, :rho_max => 1.5, :n_rho_slices => 3, :rho_spacing_mode => :linear,
         :Delta_start => 0.5, :Delta_max => 0.1, :n_Delta_slices => 3,
         :Delta_spacing_mode => :linear, :rho_onset_tol => 0.025, :Delta_onset_tol => 0.025,
         :rho_onset_max_extra_slices => 40, :Delta_onset_max_extra_slices => 40,
@@ -37,6 +38,7 @@ end
         end
         run = BoundarySearch.main([config_path])
         @test run.stop_reason == "completed"
+        @test occursin(r"^integration_\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}_(\d+|local)(_\d+)?$", basename(run.run_root))
         points = CSV.read(joinpath(run.run_root, "slices", "slice_0001", "point_results.csv"), DataFrame)
         @test nrow(points) >= 3
         @test all(isfinite, points.gap_min)
@@ -62,6 +64,28 @@ const received_kappas = Ref{Vector{Float64}}(Float64[])
     return (phase_label=phase, topo_fraction=Float64(phase), invariant_mean=Float64(phase),
         invariant_min=Float64(phase), invariant_max=Float64(phase), gap_min=0.1,
         gap_mean=0.1, gap_max=0.1, n_samples=length(x0s) * length(kappas))
+end
+
+@testset "Physical baseline spacing in slices" begin
+    mktempdir() do directory
+        cfg = fixture(directory)
+        cfg[:n_rho_slices] = 2
+        cfg[:rho_start], cfg[:rho_max] = 1.1, 1.5
+        cfg[:u_baseline_points] = 3
+        cfg[:mu_baseline_spacing_max] = 0.1
+        cfg[:u_refine_points_per_prediction] = 0
+        classifier[] = (rho, delta, u) -> 1
+        run = BoundarySearch.run_search(cfg)
+        @test run.stop_reason == "completed"
+        @test length(run.results) == 2
+        for row in run.results
+            @test row.n_baseline == max(3, ceil(Int, row.mu_critical / 0.1) + 1)
+            @test row.mu_critical / (row.n_baseline - 1) <= 0.1
+        end
+        @test last(run.results).n_baseline > first(run.results).n_baseline
+        cfg[:mu_baseline_spacing_max] = 0.0
+        @test_throws ErrorException BoundarySearch.validate_config(cfg)
+    end
 end
 
 @testset "ordered refinement for both sweep directions" begin
@@ -163,6 +187,55 @@ end
                 @test last_result.gap_count == 1
                 @test length(last_result.transitions) == 2
             end
+        end
+    end
+end
+
+@testset "onset probe exclusions" begin
+    for mode in (:rho_up, :delta_down), skipping in (false, true)
+        mktempdir() do directory
+            cfg = fixture(directory)
+            cfg[:sweep_parameter] = mode == :rho_up ? :rho : :Delta
+            cfg[:n_rho_slices] = 5
+            cfg[:n_Delta_slices] = 5
+            cfg[:skip_trivial_interiors] = skipping
+            cfg[:audit_points_per_interval] = 3
+            progress(rho, delta) = mode == :rho_up ? (rho - 1.1) / 0.4 : (0.5 - delta) / 0.4
+            classifier[] = (rho, delta, u) ->
+                (0.2 <= u <= 0.5 || (progress(rho, delta) >= 0.875 && 0.7 <= u <= 0.8)) ? 0 : 1
+            run = BoundarySearch.run_search(cfg)
+            probes = filter(row -> row.kind == "onset_probe", run.results)
+            @test run.stop_reason == "completed"
+            @test !isempty(probes)
+            @test all(row -> skipping ? row.n_exclusions > 0 : row.n_exclusions == 0, probes)
+            @test all(row -> isempty(row.fallback), probes)
+            @test length(run.onsets) == 1
+            for probe in probes
+                directory_path = joinpath(run.run_root, "slices", "slice_$(lpad(probe.execution_id, 4, '0'))")
+                points = CSV.read(joinpath(directory_path, "point_results.csv"), DataFrame)
+                exclusions = CSV.read(joinpath(directory_path, "excluded_intervals.csv"), DataFrame)
+                @test nrow(exclusions) == (skipping ? 1 : 0)
+                @test count(==("audit"), points.stage) == (skipping ? cfg[:audit_points_per_interval] : 0)
+            end
+        end
+    end
+    mktempdir() do directory
+        cfg = fixture(directory)
+        cfg[:n_rho_slices] = 5
+        cfg[:skip_trivial_interiors] = true
+        cfg[:audit_points_per_interval] = 3
+        classifier[] = (rho, delta, u) -> begin
+            phase = (0.2 <= u <= 0.5 || (rho >= 1.45 && 0.7 <= u <= 0.8)) ? 0 : 1
+            1.44 <= rho <= 1.46 && 0.34 <= u <= 0.36 ? 1 : phase
+        end
+        run = BoundarySearch.run_search(cfg)
+        probes = filter(row -> row.kind == "onset_probe", run.results)
+        failed = filter(row -> row.fallback == "audit_phase_1", probes)
+        @test !isempty(failed)
+        for probe in failed
+            points = CSV.read(joinpath(run.run_root, "slices", "slice_$(lpad(probe.execution_id, 4, '0'))", "point_results.csv"), DataFrame)
+            @test probe.n_exclusions == 0
+            @test any(==("fallback_baseline"), points.stage)
         end
     end
 end

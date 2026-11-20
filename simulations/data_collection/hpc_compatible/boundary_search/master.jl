@@ -16,7 +16,7 @@ include(joinpath(ROOT, "core", "sweep.jl"))
 include(joinpath(ROOT, "core", "io_utils.jl"))
 
 using .TransitionTracking: EdgeTrack, predict_edges, update_tracks!, predicted_exclusions
-using .BoundaryCoverage: plan_grid
+using .BoundaryCoverage: plan_grid, baseline_point_count
 
 struct SearchStop <: Exception
     reason::String
@@ -36,6 +36,8 @@ function validate_config(cfg::Dict{Symbol,Any})
         cfg[key] isa Integer && cfg[key] >= 0 || error("$key must be a nonnegative integer")
     end
     cfg[:u_baseline_points] isa Integer && cfg[:u_baseline_points] >= 3 || error("u_baseline_points must be at least 3")
+    spacing = get(cfg, :mu_baseline_spacing_max, nothing)
+    spacing === nothing || (spacing isa Real && isfinite(spacing) && spacing > 0) || error("mu_baseline_spacing_max must be nothing or finite and positive")
     prediction_count = get(cfg, :u_refine_points_per_prediction, 0)
     prediction_count isa Integer && (prediction_count == 0 || prediction_count >= 3) || error("u_refine_points_per_prediction must be 0 or at least 3")
     for key in (:t1_fixed, :t2_fixed, :Delta, :transition_u_tol, :rho_onset_tol, :Delta_onset_tol, :kk_tol)
@@ -104,12 +106,33 @@ function check_stop(stop_files)
     any(isfile, stop_files) && throw(SearchStop("stop_requested"))
 end
 
+function create_run_root(output_root, run_name)
+    timestamp = Dates.format(now(), "yy-mm-dd-HH-MM-SS")
+    raw_job_id = get(ENV, "SLURM_JOB_ID", "local")
+    job_id = occursin(r"^\d+$", raw_job_id) ? raw_job_id : "local"
+    base = joinpath(output_root, "$(run_name)_$(timestamp)_$(job_id)")
+    candidate = base
+    suffix = 1
+    while true
+        try
+            mkdir(candidate)
+            return candidate
+        catch error
+            ispath(candidate) || rethrow(error)
+            candidate = "$(base)_$(suffix)"
+            suffix += 1
+        end
+    end
+end
+
 function scan_slice(value, execution_id, cfg, ctx, predictions, exclusions, total, stop_files, run_root; kind="frontier")
     directory = joinpath(run_root, "slices", @sprintf("slice_%04d", execution_id))
     mkpath(directory)
     params = SliceSweep.physical_parameters(value, cfg, ctx.gamma, ctx.fixed_mu_critical)
     isfinite(params.mu_critical) && params.mu_critical > 0 || error("mu_critical must be finite and positive")
-    plan = plan_grid(cfg[:u_range], cfg[:u_baseline_points], exclusions, cfg[:audit_points_per_interval])
+    baseline_count = baseline_point_count(cfg[:u_range], cfg[:u_baseline_points], params.mu_critical,
+        get(cfg, :mu_baseline_spacing_max, nothing))
+    plan = plan_grid(cfg[:u_range], baseline_count, exclusions, cfg[:audit_points_per_interval])
     samples = Dict{Float64,NamedTuple}()
     observations = NamedTuple[]
     fallback = ""
@@ -187,7 +210,7 @@ function scan_slice(value, execution_id, cfg, ctx, predictions, exclusions, tota
         end
         if !isempty(fallback)
             active_exclusions = Tuple{Float64,Float64}[]
-            evaluate_many(plan_grid(cfg[:u_range], cfg[:u_baseline_points], [], 0).points, "fallback_baseline"; force=true)
+            evaluate_many(plan_grid(cfg[:u_range], baseline_count, [], 0).points, "fallback_baseline"; force=true)
             evaluate_many(predicted_points, "planned")
         else
             evaluate_many(vcat(plan.points, predicted_points), "planned")
@@ -212,7 +235,7 @@ function scan_slice(value, execution_id, cfg, ctx, predictions, exclusions, tota
             end
             if !isempty(fallback)
                 active_exclusions = Tuple{Float64,Float64}[]
-                evaluate_many(plan_grid(cfg[:u_range], cfg[:u_baseline_points], [], 0).points, "fallback_baseline"; force=true)
+                evaluate_many(plan_grid(cfg[:u_range], baseline_count, [], 0).points, "fallback_baseline"; force=true)
             end
         end
         transitions = NamedTuple[]
@@ -282,7 +305,7 @@ function run_search(cfg::Dict{Symbol,Any}; config_path="")
     BLAS.set_num_threads(Int(cfg[:blas_threads]))
     ctx = make_context(cfg)
     mkpath(String(cfg[:output_root]))
-    run_root = mktempdir(String(cfg[:output_root]); prefix=String(cfg[:run_name]) * "_", cleanup=false)
+    run_root = create_run_root(String(cfg[:output_root]), String(cfg[:run_name]))
     pointer = String(cfg[:run_root_pointer_file])
     mkpath(dirname(pointer))
     open(pointer, "w") do io
@@ -341,7 +364,9 @@ function run_search(cfg::Dict{Symbol,Any}; config_path="")
                 midpoint != left.sweep_value && midpoint != right.sweep_value || throw(SearchStop("onset_refinement_limit"))
                 execution_id += 1
                 probe_predictions = predict_edges(tracks, midpoint, length(results) + 1, cfg[:u_range], cfg)
-                probe = scan_slice(midpoint, execution_id, cfg, ctx, probe_predictions, [], total, stop_files, run_root; kind="onset_probe")
+                probe_exclusions = cfg[:skip_trivial_interiors] ?
+                    predicted_exclusions(probe_predictions, previous.transitions, latest_ids, cfg, cfg[:u_range]) : []
+                probe = scan_slice(midpoint, execution_id, cfg, ctx, probe_predictions, probe_exclusions, total, stop_files, run_root; kind="onset_probe")
                 extra += 1
                 push!(buffered, probe)
                 popfirst!(queue)

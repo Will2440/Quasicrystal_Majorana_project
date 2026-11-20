@@ -19,15 +19,15 @@ Dict{Symbol,Any}(
     :t1_fixed => 1.0,
     :t2_fixed => 2.0,
     :Delta => 0.05,
-    :rho_start => 1.01,
-    :rho_max => 2.0,
+    :rho_start => 1.0,
+    :rho_max => 10.0,
     :n_rho_slices => 101,
-    :rho_spacing_mode => :linear,
+    :rho_spacing_mode => :log,  # :linear or :log
     :rho_log_concentration => 4.0,
     :Delta_start => 1.0,
-    :Delta_max => 0.001,
-    :n_Delta_slices => 21,
-    :Delta_spacing_mode => :exponential,
+    :Delta_max => 0.01,
+    :n_Delta_slices => 11,
+    :Delta_spacing_mode => :exponential,  # :linear or :exponential
     :Delta_exponential_concentration => 4.0,
     :u_range => (0.0, 1.05),
 
@@ -46,7 +46,7 @@ Dict{Symbol,Any}(
     :transition_u_tol => 1e-4,
     :transition_max_refine_iters => 40,
     :rho_onset_tol => 0.01,
-    :rho_onset_max_extra_slices => 40,
+    :rho_onset_max_extra_slices => 1000,
     :Delta_onset_tol => 0.0005,
     :Delta_onset_max_extra_slices => 200,
     :max_points_per_slice => 100_000,
@@ -54,10 +54,10 @@ Dict{Symbol,Any}(
 
     :confidence_min_history => 3,
     :confidence_max_residual => 0.01,
-    :boundary_padding_min => 0.03,
-    :boundary_padding_max => 0.08,
+    :boundary_padding_min => 0.01,
+    :boundary_padding_max => 0.03,
     :audit_points_per_interval => 5,
-    :skip_trivial_interiors => false,  # experimental; requires audits, predicted boundaries can move
+    :skip_trivial_interiors => true, # skip interior points that are determined trivial by boundaries
     :momentum_enabled => true,
     :momentum_min_history => 3,
     :momentum_damping => 0.2,

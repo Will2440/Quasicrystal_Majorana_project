@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=boundary_search
-#SBATCH --output=boundary_search_%j.out
-#SBATCH --error=boundary_search_%j.err
+#SBATCH --output=logs/boundary_search_%j.out
+#SBATCH --error=logs/boundary_search_%j.err
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=24
-#SBATCH --time=02:00:00
-#SBATCH --mem=64G
+#SBATCH --time=01:00:00
+#SBATCH --mem=50G
 
 set -euo pipefail
 
