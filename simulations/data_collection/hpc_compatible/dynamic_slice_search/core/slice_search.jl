@@ -10,7 +10,8 @@ export build_rho_grid,
        refine_transition_bracket,
        refine_low_gap_intervals!
 
-function build_rho_grid(rho_start::Real, rho_max::Real, n_slices::Integer, spacing::Symbol=:linear)
+function build_rho_grid(rho_start::Real, rho_max::Real, n_slices::Integer, spacing::Symbol=:linear;
+                        concentration::Real=4.0)
     rho_start > 0 || error("rho_start must be positive")
     rho_max >= rho_start || error("rho_max must be greater than or equal to rho_start")
     n_slices >= 1 || error("n_rho_slices must be at least one")
@@ -19,8 +20,18 @@ function build_rho_grid(rho_start::Real, rho_max::Real, n_slices::Integer, spaci
         n_slices == 1 && return [Float64(rho_start)]
         return collect(range(Float64(rho_start), Float64(rho_max); length=n_slices))
     elseif spacing == :log
+        isfinite(concentration) && 0 < concentration <= 700 ||
+            error("rho log concentration must be finite and in (0, 700]")
         n_slices == 1 && return [Float64(rho_start)]
-        return exp.(range(log(Float64(rho_start)), log(Float64(rho_max)); length=n_slices))
+        rho_lo, rho_hi = Float64(rho_start), Float64(rho_max)
+        positions = range(0.0, 1.0; length=n_slices)
+        bias_to_low_rho = rho_lo * rho_hi <= 1.0
+        log_fractions = if bias_to_low_rho
+            expm1.(Float64(concentration) .* positions) ./ expm1(Float64(concentration))
+        else
+            1 .- expm1.(Float64(concentration) .* (1 .- positions)) ./ expm1(Float64(concentration))
+        end
+        return exp.(log(rho_lo) .+ log(rho_hi / rho_lo) .* log_fractions)
     end
     error("Unknown rho spacing mode: $spacing (expected :linear or :log)")
 end

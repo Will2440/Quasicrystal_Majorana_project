@@ -20,13 +20,14 @@ The sparse discovery scan cannot guarantee detection of a phase interval narrowe
 
 Edit `config/default_slice_config.jl` for the default run or pass another config file to the launcher.
 
-- `sweep_parameter`: `:rho` or `:Delta`. Older configs without this key default to `:rho`; the provided default config selects `:Delta`.
+- `sweep_parameter`: `:rho` or `:Delta`. Older configs without this key default to `:rho`; the provided default config selects `:rho`.
 - For a rho sweep, `Delta` is fixed. `sweep_mode = :vary_t2` fixes `t1_fixed` and sets `t2 = rho * t1`; `:vary_t1` fixes `t2_fixed` and sets `t1 = t2 / rho`.
 - `rho_start`, `rho_max`, `n_rho_slices`: inclusive sweep range and number of initial slices.
-- `rho_spacing_mode`: `:linear` or `:log` spacing in rho.
+- `rho_spacing_mode`: `:linear` or `:log` spacing in rho. `:log` interpolates in log(rho) and exponentially warps the sample positions. It clusters toward the smaller-rho endpoint when the range's geometric midpoint is at or below 1, and toward the larger-rho endpoint when it is above 1. Thus ranges below 1 cluster toward low rho; ranges above 1 cluster toward high rho. For a range crossing 1, the geometric midpoint selects the biased endpoint.
+- `rho_log_concentration`: positive concentration parameter for `:log` spacing (default 4.0); larger values cluster more strongly toward the selected endpoint. This setting has no effect with `:linear` spacing.
 - For a Delta sweep, set both `t1_fixed` and `t2_fixed` to the desired hopping values. Both remain fixed, and `rho = t2_fixed / t1_fixed`; `sweep_mode` and the fixed `Delta` value are ignored.
-- `Delta_start`, `Delta_max`, `n_Delta_slices`, `Delta_spacing_mode`: inclusive Delta sweep in either direction. Despite its historical name, `Delta_max` is the final endpoint, not necessarily the maximum. `:linear` permits zero; `:log` requires both endpoints to be positive. `:exponential` permits zero and concentrates slices near the smaller endpoint.
-- `Delta_exponential_concentration`: positive exponent controlling `:exponential` spacing (default 4.0). For endpoints 1 and 0, the grid is `expm1(c * x) / expm1(c)` with `x` evenly spaced from 1 down to 0. Larger values concentrate more slices near zero; this is a sampling choice, not a guarantee of resolving an exponential gap density.
+- `Delta_start`, `Delta_max`, `n_Delta_slices`, `Delta_spacing_mode`: inclusive Delta sweep in either direction. Despite its historical name, `Delta_max` is the final endpoint, not necessarily the maximum. `:linear` uses equal Delta steps and permits zero. `:log` uses geometric spacing (equal steps in log(Delta)) and requires both endpoints to be positive. `:exponential` permits zero and concentrates samples toward the smaller Delta endpoint, whether the sweep is increasing or decreasing.
+- `Delta_exponential_concentration`: positive exponent controlling `:exponential` spacing (default 4.0; accepted range `(0, 700]`). For endpoints 1 and 0, the grid is `expm1(c * x) / expm1(c)` with `x` evenly spaced from 1 down to 0. Larger values concentrate more samples near the smaller endpoint. This is a sampling choice, not a guarantee of resolving an exponential gap density.
 - `u_range`: normalized mu range. In rho mode physical bounds are recalculated at each rho; in Delta mode they are calculated once for the selected sequence slope and fixed hoppings and reused on every slice.
 - `kappa_mode`: `:user_defined` evaluates every entry in `kappas` at every `x0`; `:delta_over_L` uses one value `Delta / N`, where `N` is the number of chain sites (unit lattice spacing). Older configs without this setting use `:user_defined`. In rho sweeps, Delta is fixed, so `:delta_over_L` gives the same kappa on every slice. Onset probes use their own Delta.
 - `kappas`: a nonempty collection of finite, nonnegative values for `:user_defined`; for example, `collect(range(1e-5, 1e-4; length=5))`. Every kappa and position contributes to the same phase vote and summary statistics, not independent kappa-resolved runs. The list is ignored in `:delta_over_L` mode.
@@ -46,7 +47,20 @@ Edit `config/default_slice_config.jl` for the default run or pass another config
 
 All hopping, sequence-selection, localizer, and disorder-free physical parameters are also in the config. Transition tracks are evaluated in physical mu; stored rows include both `mu` and `u`.
 
-The default config sweeps Delta from 1 to 0.001 with rho fixed at 1.5 and uses Delta-dependent kappa:
+The provided default config sweeps rho from 0.001 to 1 with `t1` fixed at 1, `Delta` fixed at 0.05, and linear rho spacing. For example, to use the logarithmic bias toward the low-rho endpoint, set:
+
+```julia
+:sweep_parameter => :rho,
+:sweep_mode => :vary_t2,
+:t1_fixed => 1.0,
+:rho_start => 1e-3,
+:rho_max => 1.0,
+:n_rho_slices => 101,
+:rho_spacing_mode => :log,
+:rho_log_concentration => 4.0,
+```
+
+A Delta-sweep configuration can instead fix the hoppings and use exponential sampling toward smaller Delta:
 
 ```julia
 :sweep_parameter => :Delta,

@@ -120,7 +120,19 @@ end
     @test SliceSearch.build_rho_grid(1.0, 3.0, 1, :linear) == [1.0]
     @test SliceSearch.build_rho_grid(1.0, 3.0, 1, :log) == [1.0]
     logarithmic = SliceSearch.build_rho_grid(1.0, 9.0, 3, :log)
-    @test logarithmic ≈ [1.0, 3.0, 9.0]
+        @test logarithmic[1] ≈ 1.0
+        @test logarithmic[end] ≈ 9.0
+        @test logarithmic[2] > 3.0
+        low_rho_logarithmic = SliceSearch.build_rho_grid(0.01, 1.0, 5, :log)
+        @test first(low_rho_logarithmic) ≈ 0.01
+        @test last(low_rho_logarithmic) ≈ 1.0
+        @test low_rho_logarithmic[2] - low_rho_logarithmic[1] <
+            low_rho_logarithmic[end] - low_rho_logarithmic[end - 1]
+        high_rho_logarithmic = SliceSearch.build_rho_grid(1.0, 9.0, 5, :log)
+        @test first(high_rho_logarithmic) ≈ 1.0
+        @test last(high_rho_logarithmic) ≈ 9.0
+        @test high_rho_logarithmic[2] - high_rho_logarithmic[1] >
+            high_rho_logarithmic[end] - high_rho_logarithmic[end - 1]
     @test_throws ErrorException SliceSearch.build_rho_grid(0.0, 3.0, 5, :log)
     @test SliceSearch.build_delta_grid(0.0, 0.2, 3, :linear) ≈ [0.0, 0.1, 0.2]
     @test SliceSearch.build_delta_grid(0.01, 1.0, 3, :log) ≈ [0.01, 0.1, 1.0]

@@ -27,7 +27,8 @@ function sweep_grid(cfg)
     parameter = sweep_parameter(cfg)
     if parameter == :rho
         return SliceSearch.build_rho_grid(cfg[:rho_start], cfg[:rho_max],
-                                          cfg[:n_rho_slices], cfg[:rho_spacing_mode])
+            cfg[:n_rho_slices], cfg[:rho_spacing_mode];
+            concentration=get(cfg, :rho_log_concentration, 4.0))
     elseif parameter == :Delta
         return SliceSearch.build_delta_grid(cfg[:Delta_start], cfg[:Delta_max],
             cfg[:n_Delta_slices], cfg[:Delta_spacing_mode];
