@@ -85,10 +85,21 @@ function run_selected_solver(
         end
 
     elseif opts.solver_type == :N_loop
+        t_n = pick1("t_n_range", t_n_range)
+        Delta = pick1("Delta_range", Delta_range)
+        sequence = pick1("sequences", sequences)
+        sequence_id = sequence_ids === nothing || isempty(sequence_ids) ? (NaN, NaN) : first(sequence_ids)
+
         if opts.calc_precision == :np
-            error(":N_loop solver for normal precision not yet implemented.")
+            HPCSolv.np_serial_solver_N_loop(
+                N_range, t_n, mu_range, Delta, sequence, sequence_name,
+                sequence_id, chunk_size, filepath, opts, row_index
+            )
         elseif opts.calc_precision == :hp
-            HPCSolv.hp_serial_solver_N_loop(N_range, t_n_range[1], mu_range, Delta_range[1], sequences[1], sequence_name, precision, filepath, opts, row_index)
+            HPCSolv.hp_serial_solver_N_loop(
+                N_range, t_n, mu_range, Delta, sequence, sequence_name,
+                sequence_id, precision, chunk_size, filepath, opts, row_index
+            )
         elseif opts.calc_precision == :Arpack
             error("ARPACK-based N_loop solver not yet implemented.")
         else

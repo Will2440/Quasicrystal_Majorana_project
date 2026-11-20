@@ -102,7 +102,7 @@ function read_parameters(params_path::String)
 end
 
 # Choose the .dat file and which row to run
-params_filename = "params_hof_style_slopes_N500_phason_0.0-1-0.0_nbins1000_npb1_20261113151452_s0.6180339887498948_t0.001_Ns1_mu10_d10_t11_t21_slope1_p1_Ns500-500-1_mus0.0-3.0-1201_D0.01-0.1-10_t11.0-1.0-1_t21.5-1.5-1.dat"
+params_filename = "params_slopes_N10000_literal_0.61803_phason_0.61803-1-0.61803_mapto(2, 1)_20261120090708_s0.6180339887498948_t0.001_Ns64_mu1_d1_t11_t21_slope1_p1_Ns2-5000-64_mus0.0-3.0-31_D0.05-0.05-1_t11.0-1.0-1_t21.5-1.5-1.dat"
 params_dat_path = joinpath(project_root, "batch_params", "param_sets", params_filename)
 
 
@@ -135,10 +135,10 @@ sequence_ids = p.sequence_ids          # Vector{Tuple{Float64,Float64}}
 sequence_name = p.sequence_names[1]
 
 ## Set Precision for hp calculations
-BigFloat_precision = 512
+BigFloat_precision = 256
 
 ## Set chunk size for data saving
-chunk_size = 2200
+chunk_size = 1
 
 ## Set eta and omega_range for spectral function calculation
 eta = 0.1
@@ -213,10 +213,12 @@ function get_user_options()
         false,    # calc_spec_func
         eta,     # spec_eta
         omega_range, # spec_omega_range
-        :np,     # calc_precision: :hp, :np
+        :hp,     # calc_precision: :hp, :np
         :none, # save_evecs: :all_np, :all_hp, :maj_np, :maj_hp, :none
-        :all_np, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :half_np, :half_hp, :none
-        :generic # solver_type: :generic, seq_scaled, :mu_loop, :N_loop, :restricted, :spec_loc, :spec_loc_optimised
+        :none, # save_evals: :all_np, :all_hp, :maj_np, :maj_hp, :half_np, :half_hp, :none
+        :N_loop, # solver_type: :generic, seq_scaled, :mu_loop, :N_loop, :restricted, :spec_loc, :spec_loc_optimised
+        true,     # logging: print sweep progress, elapsed time, and ETA
+        0         # logging_interval: 0 selects roughly 1% intervals
     )
 end
 
@@ -256,7 +258,7 @@ opts = get_user_options()
 precision_label = opts.calc_precision == :hp ? "hp" :
                   opts.calc_precision == :np ? "np" : "arpack"
 
-project_name = "QC-SC_ration_specloc"
+project_name = "Ns_largetest"
 
 # Save under serial_batch/results/
 root_path = joinpath(project_root, "results", precision_label, project_name)
